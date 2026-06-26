@@ -1,0 +1,19 @@
+[build]
+  base    = "expense-tracking-ui"
+  command = "npm run build"
+  publish = ".next"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# ── Environment variables ────────────────────────────────
+# Set these in the Netlify dashboard:
+#   Site settings → Environment variables
+#
+#   NEXT_PUBLIC_SUPABASE_URL      = https://your-project.supabase.co
+#   NEXT_PUBLIC_SUPABASE_ANON_KEY = your-anon-key-here
+#
+# Never commit .env.local to git — it's already in .gitignore
+
+[build.environment]
+  NODE_VERSION = "20"

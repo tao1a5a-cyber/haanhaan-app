@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "haanhaan-dev",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["node_modules/next/dist/bin/next", "dev", "--port", "4322"],
+      "cwd": "/Users/sittipornnoppakoon/Desktop/easy money/expense-tracking-ui",
+      "port": 4322
+    }
+  ]
+}
