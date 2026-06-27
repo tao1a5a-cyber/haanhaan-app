@@ -1,9 +1,9 @@
 "use client"
 
 import { useState } from "react"
-import Image from "next/image"
-import { Bell, Users, X, CheckCheck } from "lucide-react"
-import type { User } from "./users"
+import { Bell, Users, X, CheckCheck, ChevronDown } from "lucide-react"
+import { MemberAvatar } from "./member-avatar"
+import type { Group, Member } from "./types"
 import type { AppNotification } from "./notifications"
 
 function greeting() {
@@ -30,64 +30,70 @@ const typeIcon: Record<AppNotification["type"], string> = {
 }
 
 type Props = {
-  user: User
+  group: Group
+  member: Member
   notifications: AppNotification[]
-  onSwitch?: () => void
+  onSwitchMember?: () => void
+  onSwitchGroup?: () => void
   onMarkAllRead?: () => void
   onOpenSettings?: () => void
 }
 
-export function AppHeader({ user, notifications, onSwitch, onMarkAllRead, onOpenSettings }: Props) {
+export function AppHeader({ group, member, notifications, onSwitchMember, onSwitchGroup, onMarkAllRead, onOpenSettings }: Props) {
   const [showPanel, setShowPanel] = useState(false)
   const unread = notifications.filter((n) => !n.read).length
 
   return (
     <>
-      <header className="flex items-center justify-between px-5 pt-6 pb-2">
-        <div className="flex items-center gap-3">
+      <header className="px-5 pt-6 pb-2">
+        {/* group chip + actions */}
+        <div className="flex items-center justify-between">
           <button
             type="button"
-            onClick={onOpenSettings}
-            aria-label="ตั้งค่าโปรไฟล์"
-            className="grid size-11 place-items-center overflow-hidden rounded-full shadow-sm ring-1 ring-border transition active:scale-90"
-            style={{ backgroundColor: user.tint }}
+            onClick={onSwitchGroup}
+            className="flex items-center gap-1.5 rounded-full bg-card px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-border transition active:scale-95"
           >
-            <Image
-              src={user.avatar || "/placeholder.svg"}
-              alt=""
-              width={44}
-              height={44}
-              className="size-[72%] object-contain"
-            />
+            <Users className="size-3.5 text-accent" />
+            <span className="max-w-[10rem] truncate">{group.name}</span>
+            <ChevronDown className="size-3.5 text-muted-foreground" />
           </button>
-          <div className="leading-tight">
-            <p className="text-xs text-muted-foreground">{greeting()}</p>
-            <p className="text-base font-semibold text-foreground">{user.name}</p>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowPanel(true)}
+              aria-label="การแจ้งเตือน"
+              className="relative grid size-10 place-items-center rounded-full bg-card text-foreground shadow-sm ring-1 ring-border transition active:scale-95"
+            >
+              <Bell className="size-[18px]" />
+              {unread > 0 && (
+                <span className="absolute right-2 top-2 flex size-[9px] items-center justify-center rounded-full bg-accent ring-2 ring-card" />
+              )}
+            </button>
+            <button
+              type="button"
+              onClick={onSwitchMember}
+              aria-label="สลับสมาชิก"
+              className="grid size-10 place-items-center rounded-full bg-card text-foreground shadow-sm ring-1 ring-border transition active:scale-95"
+            >
+              <ChevronDown className="size-[18px]" />
+            </button>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setShowPanel(true)}
-            aria-label="การแจ้งเตือน"
-            className="relative grid size-10 place-items-center rounded-full bg-card text-foreground shadow-sm ring-1 ring-border transition active:scale-95"
-          >
-            <Bell className="size-[18px]" />
-            {unread > 0 && (
-              <span className="absolute right-2 top-2 flex size-[9px] items-center justify-center rounded-full bg-accent ring-2 ring-card">
-              </span>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={onSwitch}
-            aria-label="สลับโปรไฟล์"
-            className="grid size-10 place-items-center rounded-full bg-card text-foreground shadow-sm ring-1 ring-border transition active:scale-95"
-          >
-            <Users className="size-[18px]" />
-          </button>
-        </div>
+        {/* greeting + current member */}
+        <button
+          type="button"
+          onClick={onOpenSettings}
+          aria-label="ตั้งค่าโปรไฟล์"
+          className="mt-3 flex items-center gap-3 transition active:scale-[0.99]"
+        >
+          <MemberAvatar member={member} size={44} className="shadow-sm ring-1 ring-border" />
+          <div className="text-left leading-tight">
+            <p className="text-xs text-muted-foreground">{greeting()}</p>
+            <p className="text-base font-semibold text-foreground">{member.name}</p>
+          </div>
+        </button>
       </header>
 
       {/* Notification panel */}

@@ -5,7 +5,8 @@ import { PieChart } from "lucide-react"
 import { getCategory, formatBaht, type Category, type Transaction } from "./categories"
 import { CategoryGlyph } from "./category-glyph"
 import { DonutChart } from "./donut-chart"
-import type { User } from "./users"
+import { MemberAvatar } from "./member-avatar"
+import type { Member } from "./types"
 
 type Period = "day" | "month" | "year"
 
@@ -40,13 +41,11 @@ function periodLabel(p: Period) {
 export function SummaryView({
   transactions,
   categories,
-  user,
-  partner,
+  members,
 }: {
   transactions: Transaction[]
   categories: Category[]
-  user: User
-  partner: User
+  members: Member[]
 }) {
   const [period, setPeriod] = useState<Period>("month")
   const periodIndex = periods.findIndex((p) => p.id === period)
@@ -54,12 +53,10 @@ export function SummaryView({
   const data = useMemo(() => {
     const txs = transactions.filter((t) => inPeriod(t.createdAt, period))
     const total = txs.reduce((s, t) => s + t.amount, 0)
-    const paidByUser = txs
-      .filter((t) => t.payerId === user.id)
-      .reduce((s, t) => s + t.amount, 0)
-    const paidByPartner = txs
-      .filter((t) => t.payerId === partner.id)
-      .reduce((s, t) => s + t.amount, 0)
+    const paidByMember = members.map((m) => ({
+      member: m,
+      paid: txs.filter((t) => t.payerId === m.id).reduce((s, t) => s + t.amount, 0),
+    }))
 
     const byCatMap = new Map<string, number>()
     txs.forEach((t) => {
@@ -78,13 +75,12 @@ export function SummaryView({
     return {
       count: txs.length,
       total,
-      paidByUser,
-      paidByPartner,
+      paidByMember,
       byCat,
       avgPerTx: txs.length ? total / txs.length : 0,
       avgPerDay: period === "day" ? total : total / days,
     }
-  }, [transactions, categories, period, user.id, partner.id])
+  }, [transactions, categories, period, members])
 
   return (
     <div className="space-y-5 px-5 pt-2">
@@ -120,15 +116,16 @@ export function SummaryView({
         <p className="mt-1 text-sm text-primary-foreground/80">
           {data.count ? `${data.count} รายการ` : "ยังไม่มีรายการ"}
         </p>
-        <div className="mt-4 grid grid-cols-2 gap-3">
-          <div className="rounded-2xl bg-white/15 p-3 backdrop-blur-sm">
-            <p className="text-xs text-primary-foreground/75">{user.name} จ่าย</p>
-            <p className="mt-0.5 text-lg font-semibold tabular-nums">฿{formatBaht(data.paidByUser)}</p>
-          </div>
-          <div className="rounded-2xl bg-white/15 p-3 backdrop-blur-sm">
-            <p className="text-xs text-primary-foreground/75">{partner.name} จ่าย</p>
-            <p className="mt-0.5 text-lg font-semibold tabular-nums">฿{formatBaht(data.paidByPartner)}</p>
-          </div>
+        <div className="mt-4 grid grid-cols-2 gap-2.5">
+          {data.paidByMember.map(({ member, paid }) => (
+            <div key={member.id} className="flex items-center gap-2 rounded-2xl bg-white/15 p-2.5 backdrop-blur-sm">
+              <MemberAvatar member={member} size={28} />
+              <div className="min-w-0">
+                <p className="truncate text-xs text-primary-foreground/75">{member.name} จ่าย</p>
+                <p className="text-base font-semibold tabular-nums">฿{formatBaht(paid)}</p>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
 

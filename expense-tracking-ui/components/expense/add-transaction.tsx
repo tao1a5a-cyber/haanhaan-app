@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, useMemo, useState } from "react"
-import { Plus, Receipt, Check, X, ImagePlus } from "lucide-react"
+import { Plus, X, ImagePlus, Check } from "lucide-react"
 import {
   splitModes,
   formatBaht,
@@ -11,17 +11,19 @@ import {
 } from "./categories"
 import { CategoryGlyph } from "./category-glyph"
 import { CategoryCreator } from "./category-creator"
-import type { User } from "./users"
+import { MemberAvatar } from "./member-avatar"
+import { splitEqually } from "@/lib/balances"
+import type { Member } from "./types"
 
 type Props = {
   categories: Category[]
-  user: User
-  partner: User
-  onAdd: (tx: Omit<Transaction, "id" | "createdAt" | "owed" | "payerId">, slipFile?: File) => void
+  members: Member[]
+  currentMember: Member
+  onAdd: (tx: Omit<Transaction, "id" | "createdAt" | "payerId" | "groupId">, slipFile?: File) => void
   onAddCategory: (label: string, emoji: string) => string
 }
 
-export function AddTransaction({ categories, user, partner, onAdd, onAddCategory }: Props) {
+export function AddTransaction({ categories, members, currentMember, onAdd, onAddCategory }: Props) {
   const [amount, setAmount] = useState("")
   const [detail, setDetail] = useState("")
   const [categoryId, setCategoryId] = useState("food")
@@ -30,25 +32,62 @@ export function AddTransaction({ categories, user, partner, onAdd, onAddCategory
   const [slipFile, setSlipFile] = useState<File | null>(null)
   const [slipName, setSlipName] = useState("")
   const [creatingCategory, setCreatingCategory] = useState(false)
-  const [myCustom, setMyCustom] = useState("")
-  const [partnerCustom, setPartnerCustom] = useState("")
+  // participants in the split — default everyone
+  const [selected, setSelected] = useState<string[]>(() => members.map((m) => m.id))
+  // custom split: memberId -> string input
+  const [custom, setCustom] = useState<Record<string, string>>({})
   const slipInputRef = useRef<HTMLInputElement>(null)
 
   const amountNum = Number(amount) || 0
-  const myCustomNum = Number(myCustom) || 0
-  const partnerCustomNum = Number(partnerCustom) || 0
   const splitIndex = splitModes.findIndex((m) => m.id === split)
+
+  const selectedMembers = members.filter((m) => selected.includes(m.id))
+  // For ฝากจ่าย the payer doesn't owe; beneficiaries = selected minus payer.
+  const beneficiaries = split === "request"
+    ? selected.filter((id) => id !== currentMember.id)
+    : selected
+
+  const customNum = (id: string) => Number(custom[id]) || 0
+  const customTotal = useMemo(
+    () => selected.reduce((s, id) => s + customNum(id), 0),
+    [custom, selected],
+  )
+
+  function toggleMember(id: string) {
+    setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  }
+
+  /** Build the shares map (memberId → owed portion) for the chosen split. */
+  function buildShares(): Record<string, number> | null {
+    if (amountNum <= 0) return null
+    if (split === "custom") {
+      if (Math.abs(customTotal - amountNum) > 0.01) return null
+      const rec: Record<string, number> = {}
+      for (const id of selected) rec[id] = customNum(id)
+      return rec
+    }
+    if (split === "request") {
+      if (beneficiaries.length === 0) return null
+      return splitEqually(amountNum, beneficiaries)
+    }
+    // equal
+    if (selected.length === 0) return null
+    return splitEqually(amountNum, selected)
+  }
 
   const sharePreview = useMemo(() => {
     if (amountNum <= 0) return null
-    if (split === "split") return `${partner.name} ต้องจ่ายคืนคุณ ฿${formatBaht(amountNum / 2)}`
-    if (split === "request") return `${partner.name} ต้องจ่ายคืนคุณ ฿${formatBaht(amountNum)}`
     if (split === "custom") {
-      if (partnerCustomNum > 0) return `${partner.name} ต้องจ่ายคืนคุณ ฿${formatBaht(partnerCustomNum)}`
-      return "ระบุจำนวนเงินของแต่ละคนด้านล่าง"
+      const ok = Math.abs(customTotal - amountNum) < 0.01
+      return ok ? "ยอดรวมตรงกัน ✓" : `รวม ฿${formatBaht(customTotal)} · ต้องเท่ากับ ฿${formatBaht(amountNum)}`
     }
-    return null
-  }, [amountNum, split, partner.name, partnerCustomNum])
+    if (split === "request") {
+      if (beneficiaries.length === 0) return "เลือกคนที่ต้องจ่ายคืน"
+      return `คนละ ฿${formatBaht(amountNum / beneficiaries.length)} · ${beneficiaries.length} คนจ่ายคืนเต็ม`
+    }
+    if (selected.length === 0) return "เลือกอย่างน้อย 1 คน"
+    return `แบ่งคนละ ฿${formatBaht(amountNum / selected.length)} · ${selected.length} คน`
+  }, [amountNum, split, selected.length, beneficiaries.length, customTotal])
 
   function handleSlipFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -59,22 +98,21 @@ export function AddTransaction({ categories, user, partner, onAdd, onAddCategory
     e.target.value = ""
   }
 
+  const shares = buildShares()
+  const canSubmit = amountNum > 0 && shares !== null
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (amountNum <= 0) return
-    const customAmounts =
-      split === "custom"
-        ? { [user.id]: myCustomNum, [partner.id]: partnerCustomNum }
-        : undefined
+    if (!shares) return
     onAdd(
       {
         amount: amountNum,
         detail: detail.trim() || "ไม่ระบุรายละเอียด",
         categoryId,
         split,
+        shares,
         hasSlip: !!slipUrl,
         slipUrl: slipUrl ?? undefined,
-        customAmounts,
       },
       slipFile ?? undefined,
     )
@@ -85,8 +123,8 @@ export function AddTransaction({ categories, user, partner, onAdd, onAddCategory
     setSlipName("")
     setSplit("split")
     setCategoryId("food")
-    setMyCustom("")
-    setPartnerCustom("")
+    setSelected(members.map((m) => m.id))
+    setCustom({})
   }
 
   return (
@@ -97,14 +135,12 @@ export function AddTransaction({ categories, user, partner, onAdd, onAddCategory
       >
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold text-foreground">เพิ่มรายการ</h2>
-          <span className="text-xs text-muted-foreground">บันทึกค่าใช้จ่ายร่วม</span>
+          <span className="text-xs text-muted-foreground">{currentMember.name} เป็นคนจ่าย</span>
         </div>
 
         {/* Amount */}
         <div className="mt-4 rounded-2xl bg-secondary px-4 py-4">
-          <label htmlFor="amount" className="text-xs font-medium text-muted-foreground">
-            จำนวนเงินรวม
-          </label>
+          <label htmlFor="amount" className="text-xs font-medium text-muted-foreground">จำนวนเงินรวม</label>
           <div className="mt-1 flex items-center gap-2">
             <span className="text-3xl font-semibold text-muted-foreground">฿</span>
             <input
@@ -137,35 +173,55 @@ export function AddTransaction({ categories, user, partner, onAdd, onAddCategory
                 key={c.id}
                 onClick={() => setCategoryId(c.id)}
                 className={`flex items-center gap-2 rounded-full py-2 pl-2 pr-3.5 text-sm font-medium transition active:scale-95 ${
-                  active
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "bg-secondary text-secondary-foreground ring-1 ring-border"
+                  active ? "bg-primary text-primary-foreground shadow-sm" : "bg-secondary text-secondary-foreground ring-1 ring-border"
                 }`}
               >
-                <span
-                  className={`grid size-6 place-items-center rounded-full ${
-                    active ? "bg-white/20 text-primary-foreground" : c.tint
-                  }`}
-                >
+                <span className={`grid size-6 place-items-center rounded-full ${active ? "bg-white/20 text-primary-foreground" : c.tint}`}>
                   <CategoryGlyph category={c} size={14} />
                 </span>
                 {c.label}
               </button>
             )
           })}
-
           <button
             type="button"
             onClick={() => setCreatingCategory(true)}
             aria-label="เพิ่มหมวดหมู่"
             className="flex items-center gap-1.5 rounded-full bg-secondary py-2 pl-2 pr-3.5 text-sm font-medium text-muted-foreground ring-1 ring-dashed ring-border transition active:scale-95"
           >
-            <span className="grid size-6 place-items-center rounded-full bg-card ring-1 ring-border">
-              <Plus className="size-3.5" />
-            </span>
+            <span className="grid size-6 place-items-center rounded-full bg-card ring-1 ring-border"><Plus className="size-3.5" /></span>
             เพิ่ม
           </button>
         </div>
+
+        {/* Participants */}
+        {members.length > 1 && (
+          <>
+            <p className="mt-4 mb-2 text-xs font-medium text-muted-foreground">
+              {split === "request" ? "ใครต้องจ่ายคืน" : "ใครร่วมหารบ้าง"}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {members.map((m) => {
+                const on = selected.includes(m.id)
+                const isPayer = m.id === currentMember.id
+                return (
+                  <button
+                    type="button"
+                    key={m.id}
+                    onClick={() => toggleMember(m.id)}
+                    className={`flex items-center gap-2 rounded-full py-1.5 pl-1.5 pr-3 text-sm font-medium transition active:scale-95 ${
+                      on ? "bg-accent/12 text-foreground ring-1 ring-accent/40" : "bg-secondary text-muted-foreground ring-1 ring-border"
+                    }`}
+                  >
+                    <MemberAvatar member={m} size={24} />
+                    {m.name}{isPayer ? " (จ่าย)" : ""}
+                    {on && <Check className="size-3.5 text-accent" />}
+                  </button>
+                )
+              })}
+            </div>
+          </>
+        )}
 
         {/* Split mode */}
         <p className="mt-4 mb-2 text-xs font-medium text-muted-foreground">วิธีแบ่งจ่าย</p>
@@ -179,112 +235,63 @@ export function AddTransaction({ categories, user, partner, onAdd, onAddCategory
               type="button"
               key={m.id}
               onClick={() => setSplit(m.id)}
-              className={`relative z-10 rounded-xl py-2 text-sm font-medium transition-colors ${
-                split === m.id ? "text-foreground" : "text-muted-foreground"
-              }`}
+              className={`relative z-10 rounded-xl py-2 text-sm font-medium transition-colors ${split === m.id ? "text-foreground" : "text-muted-foreground"}`}
             >
               {m.label}
             </button>
           ))}
         </div>
 
-        {/* Custom split */}
+        {/* Custom split inputs */}
         {split === "custom" && (
-          <div className="mt-3 rounded-2xl bg-secondary p-4 space-y-3">
+          <div className="mt-3 space-y-2.5 rounded-2xl bg-secondary p-4">
             <p className="text-xs font-medium text-muted-foreground">ระบุจำนวนของแต่ละคน</p>
-            <div className="flex items-center gap-3">
-              <span className="w-16 shrink-0 text-sm font-medium text-foreground">{user.name}</span>
-              <div className="flex flex-1 items-center gap-1.5 rounded-xl bg-card px-3 py-2 ring-1 ring-border">
-                <span className="text-sm text-muted-foreground">฿</span>
-                <input
-                  inputMode="decimal"
-                  placeholder="0"
-                  value={myCustom}
-                  onChange={(e) => setMyCustom(e.target.value.replace(/[^0-9.]/g, ""))}
-                  className="w-full bg-transparent text-sm font-semibold text-foreground tabular-nums outline-none placeholder:text-muted-foreground/40"
-                />
+            {selectedMembers.map((m) => (
+              <div key={m.id} className="flex items-center gap-3">
+                <span className="flex w-28 shrink-0 items-center gap-2 text-sm font-medium text-foreground">
+                  <MemberAvatar member={m} size={22} />
+                  <span className="truncate">{m.name}</span>
+                </span>
+                <div className="flex flex-1 items-center gap-1.5 rounded-xl bg-card px-3 py-2 ring-1 ring-border">
+                  <span className="text-sm text-muted-foreground">฿</span>
+                  <input
+                    inputMode="decimal"
+                    placeholder="0"
+                    value={custom[m.id] ?? ""}
+                    onChange={(e) => setCustom((p) => ({ ...p, [m.id]: e.target.value.replace(/[^0-9.]/g, "") }))}
+                    className="w-full bg-transparent text-sm font-semibold text-foreground tabular-nums outline-none placeholder:text-muted-foreground/40"
+                  />
+                </div>
               </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="w-16 shrink-0 text-sm font-medium text-foreground">{partner.name}</span>
-              <div className="flex flex-1 items-center gap-1.5 rounded-xl bg-card px-3 py-2 ring-1 ring-border">
-                <span className="text-sm text-muted-foreground">฿</span>
-                <input
-                  inputMode="decimal"
-                  placeholder="0"
-                  value={partnerCustom}
-                  onChange={(e) => setPartnerCustom(e.target.value.replace(/[^0-9.]/g, ""))}
-                  className="w-full bg-transparent text-sm font-semibold text-foreground tabular-nums outline-none placeholder:text-muted-foreground/40"
-                />
-              </div>
-            </div>
-            {myCustomNum + partnerCustomNum > 0 && amountNum > 0 && (
-              <p className={`text-xs font-medium ${
-                Math.abs(myCustomNum + partnerCustomNum - amountNum) < 0.01
-                  ? "text-accent"
-                  : "text-destructive"
-              }`}>
-                รวม ฿{formatBaht(myCustomNum + partnerCustomNum)}
-                {Math.abs(myCustomNum + partnerCustomNum - amountNum) < 0.01
-                  ? " · ตรงกับยอดรวม ✓"
-                  : ` · ยอดรวมต่างจาก ฿${formatBaht(amountNum)}`}
-              </p>
-            )}
+            ))}
           </div>
         )}
 
         {sharePreview && (
-          <p className="mt-2 text-center text-xs font-medium text-accent">{sharePreview}</p>
+          <p className={`mt-2 text-center text-xs font-medium ${canSubmit ? "text-accent" : "text-muted-foreground"}`}>
+            {sharePreview}
+          </p>
         )}
 
         {/* Slip upload */}
-        <input
-          ref={slipInputRef}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={handleSlipFile}
-        />
-
+        <input ref={slipInputRef} type="file" accept="image/*" className="hidden" onChange={handleSlipFile} />
         {slipUrl ? (
           <div className="mt-4 flex items-center gap-3 rounded-2xl bg-accent/10 px-4 py-3 ring-1 ring-accent/30">
-            {/* thumbnail */}
-            <button
-              type="button"
-              onClick={() => window.open(slipUrl, "_blank")}
-              className="shrink-0 size-12 rounded-xl overflow-hidden ring-1 ring-border"
-            >
+            <button type="button" onClick={() => window.open(slipUrl, "_blank")} className="size-12 shrink-0 overflow-hidden rounded-xl ring-1 ring-border">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={slipUrl} alt="slip" className="size-full object-cover" />
             </button>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-accent truncate">{slipName || "สลิป"}</p>
-              <button
-                type="button"
-                onClick={() => slipInputRef.current?.click()}
-                className="text-xs text-muted-foreground underline underline-offset-2 mt-0.5"
-              >
-                เปลี่ยนรูป
-              </button>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-accent">{slipName || "สลิป"}</p>
+              <button type="button" onClick={() => slipInputRef.current?.click()} className="mt-0.5 text-xs text-muted-foreground underline underline-offset-2">เปลี่ยนรูป</button>
             </div>
-            <button
-              type="button"
-              onClick={() => { setSlipUrl(null); setSlipName("") }}
-              aria-label="ลบสลิป"
-              className="grid size-7 place-items-center rounded-full bg-secondary text-muted-foreground transition active:scale-90"
-            >
+            <button type="button" onClick={() => { setSlipUrl(null); setSlipName("") }} aria-label="ลบสลิป" className="grid size-7 place-items-center rounded-full bg-secondary text-muted-foreground transition active:scale-90">
               <X className="size-3.5" />
             </button>
           </div>
         ) : (
-          <button
-            type="button"
-            onClick={() => slipInputRef.current?.click()}
-            className="mt-4 flex w-full items-center gap-3 rounded-2xl bg-secondary px-4 py-3.5 text-sm font-medium text-muted-foreground ring-1 ring-border transition active:scale-[0.99]"
-          >
-            <span className="grid size-7 place-items-center rounded-lg bg-card ring-1 ring-border">
-              <ImagePlus className="size-4" />
-            </span>
+          <button type="button" onClick={() => slipInputRef.current?.click()} className="mt-4 flex w-full items-center gap-3 rounded-2xl bg-secondary px-4 py-3.5 text-sm font-medium text-muted-foreground ring-1 ring-border transition active:scale-[0.99]">
+            <span className="grid size-7 place-items-center rounded-lg bg-card ring-1 ring-border"><ImagePlus className="size-4" /></span>
             แนบใบเสร็จ / สลิป
           </button>
         )}
@@ -292,7 +299,7 @@ export function AddTransaction({ categories, user, partner, onAdd, onAddCategory
         {/* Submit */}
         <button
           type="submit"
-          disabled={amountNum <= 0}
+          disabled={!canSubmit}
           className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-primary py-4 text-base font-semibold text-primary-foreground shadow-[0_12px_24px_-12px_oklch(0.3_0.04_55/0.8)] transition active:scale-[0.99] disabled:opacity-40 disabled:shadow-none"
         >
           <Plus className="size-5" />

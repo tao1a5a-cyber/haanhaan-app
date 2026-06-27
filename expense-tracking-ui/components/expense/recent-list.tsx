@@ -3,6 +3,7 @@
 import { Inbox } from "lucide-react"
 import { getCategory, formatBaht, splitModes, type Category, type Transaction } from "./categories"
 import { CategoryGlyph } from "./category-glyph"
+import type { Member } from "./types"
 
 function timeAgo(ts: number) {
   const diff = Date.now() - ts
@@ -17,12 +18,17 @@ function timeAgo(ts: number) {
 export function RecentList({
   items,
   categories,
+  members,
+  currentMemberId,
   onSeeAll,
 }: {
   items: Transaction[]
   categories: Category[]
+  members: Member[]
+  currentMemberId: string
   onSeeAll?: () => void
 }) {
+  const nameOf = (id: string) => members.find((m) => m.id === id)?.name ?? "—"
   return (
     <section className="px-5 pb-4">
       <div className="mb-3 flex items-center justify-between">
@@ -47,6 +53,10 @@ export function RecentList({
           {items.slice(0, 5).map((tx) => {
             const cat = getCategory(tx.categoryId, categories)
             const mode = splitModes.find((m) => m.id === tx.split)
+            const myShare = tx.shares?.[currentMemberId] ?? 0
+            const isPayer = tx.payerId === currentMemberId
+            // + you are owed this much, − you owe this much
+            const delta = tx.settled ? 0 : isPayer ? tx.amount - myShare : -myShare
             return (
               <li
                 key={tx.id}
@@ -57,14 +67,16 @@ export function RecentList({
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold text-foreground">{tx.detail}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {cat.label} · {mode?.label} · {timeAgo(tx.createdAt)}
+                  <p className="truncate text-xs text-muted-foreground">
+                    {nameOf(tx.payerId)} จ่าย · {mode?.label} · {timeAgo(tx.createdAt)}
                   </p>
                 </div>
                 <div className="text-right">
                   <p className="text-sm font-bold tabular-nums text-foreground">฿{formatBaht(tx.amount)}</p>
-                  {tx.owed > 0 && (
-                    <p className="text-xs font-medium text-accent">+฿{formatBaht(tx.owed)}</p>
+                  {Math.abs(delta) > 0.005 && (
+                    <p className={`text-xs font-medium ${delta > 0 ? "text-accent" : "text-muted-foreground"}`}>
+                      {delta > 0 ? "+" : "−"}฿{formatBaht(Math.abs(delta))}
+                    </p>
                   )}
                 </div>
               </li>

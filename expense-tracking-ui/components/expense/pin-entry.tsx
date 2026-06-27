@@ -1,12 +1,12 @@
 "use client"
 
 import { useState } from "react"
-import Image from "next/image"
 import { Delete } from "lucide-react"
-import type { User } from "./users"
+import { MemberAvatar } from "./member-avatar"
+import type { Member } from "./types"
 
 type Props = {
-  user: User
+  member: Member
   onSuccess: () => void
   onCancel: () => void
   checkPin: (pin: string) => Promise<boolean>
@@ -14,7 +14,7 @@ type Props = {
 
 const KEYS = ["1","2","3","4","5","6","7","8","9","","0","⌫"]
 
-export function PinEntry({ user, onSuccess, onCancel, checkPin }: Props) {
+export function PinEntry({ member, onSuccess, onCancel, checkPin }: Props) {
   const [digits, setDigits] = useState<string[]>([])
   const [shake, setShake] = useState(false)
   const [error, setError] = useState(false)
@@ -51,14 +51,9 @@ export function PinEntry({ user, onSuccess, onCancel, checkPin }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background px-8">
       {/* Avatar */}
-      <div
-        className="grid size-20 place-items-center overflow-hidden rounded-full shadow-md ring-2 ring-border mb-4"
-        style={{ backgroundColor: user.tint }}
-      >
-        <Image src={user.avatar || "/placeholder.svg"} alt="" width={80} height={80} className="size-[72%] object-contain" />
-      </div>
+      <MemberAvatar member={member} size={80} className="mb-4 shadow-md ring-2 ring-border" />
 
-      <p className="text-lg font-semibold text-foreground mb-1">{user.name}</p>
+      <p className="text-lg font-semibold text-foreground mb-1">{member.name}</p>
       <p className="text-sm text-muted-foreground mb-8">ใส่รหัสผ่านเพื่อเข้าใช้งาน</p>
 
       {/* Dots */}
