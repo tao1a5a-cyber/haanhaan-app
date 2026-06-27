@@ -33,7 +33,9 @@ export type Group = {
 export type Transaction = {
   id: string
   groupId: string
-  /** member id of who paid */
+  /** 'expense' = money out (default); 'income' = shared earnings split among members */
+  kind?: "expense" | "income"
+  /** member id of who paid (expense) or who received (income) */
   payerId: string
   amount: number
   detail: string

@@ -171,6 +171,26 @@ export async function updateMember(
   if (error) console.error("updateMember", error)
 }
 
+/**
+ * Bind a member to an auth user (email ↔ identity). After this, logging in
+ * with that email enters this member's profile directly — no picker.
+ * Only call for members that aren't already bound (user_id is null).
+ */
+export async function claimMember(memberId: string, userId: string) {
+  const db = tryGetSupabase()
+  if (!db) return
+  const { error } = await db.from("members").update({ user_id: userId }).eq("id", memberId)
+  if (error) console.error("claimMember", error)
+}
+
+/** Unbind a member from any auth user (clears the email ↔ identity link). */
+export async function releaseMember(memberId: string) {
+  const db = tryGetSupabase()
+  if (!db) return
+  const { error } = await db.from("members").update({ user_id: null }).eq("id", memberId)
+  if (error) console.error("releaseMember", error)
+}
+
 export async function removeMember(memberId: string) {
   const db = tryGetSupabase()
   if (!db) return
@@ -215,6 +235,7 @@ export async function fetchTransactions(groupId: string): Promise<Transaction[]>
   return rows.map((row: any) => ({
     id: row.id,
     groupId: row.group_id,
+    kind: row.kind === "income" ? "income" : "expense",
     payerId: row.payer_id,
     detail: row.detail,
     amount: Number(row.amount),
@@ -242,6 +263,7 @@ export async function insertTransaction(tx: Transaction) {
   const { error } = await db.from("transactions").insert({
     id: tx.id,
     group_id: tx.groupId,
+    kind: tx.kind ?? "expense",
     payer_id: tx.payerId,
     detail: tx.detail,
     amount: tx.amount,
@@ -261,6 +283,7 @@ export async function updateTransaction(tx: Transaction) {
   const { error } = await db
     .from("transactions")
     .update({
+      kind: tx.kind ?? "expense",
       detail: tx.detail,
       amount: tx.amount,
       shares: tx.shares,

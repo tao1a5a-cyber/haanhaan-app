@@ -54,9 +54,11 @@ function autoSplit(
 }
 
 export function AddTransaction({ categories, members, currentMember, onAdd, onAddCategory, onSubmitted }: Props) {
+  const [kind, setKind] = useState<"expense" | "income">("expense")
   const [amount, setAmount] = useState("")
   const [detail, setDetail] = useState("")
   const [categoryId, setCategoryId] = useState("food")
+  const isIncome = kind === "income"
   const [split, setSplit] = useState<SplitMode>("split")
   const [slipUrl, setSlipUrl] = useState<string | null>(null)
   const [slipFile, setSlipFile] = useState<File | null>(null)
@@ -162,6 +164,7 @@ export function AddTransaction({ categories, members, currentMember, onAdd, onAd
     if (!shares) return
     onAdd(
       {
+        kind,
         amount: amountNum,
         detail: detail.trim() || "ไม่ระบุรายละเอียด",
         categoryId,
@@ -172,6 +175,7 @@ export function AddTransaction({ categories, members, currentMember, onAdd, onAd
       },
       slipFile ?? undefined,
     )
+    setKind("expense")
     setAmount("")
     setDetail("")
     setSlipUrl(null)
@@ -192,8 +196,33 @@ export function AddTransaction({ categories, members, currentMember, onAdd, onAd
         className="rounded-[1.75rem] bg-card p-5 shadow-[0_10px_30px_-20px_oklch(0.3_0.04_55/0.5)] ring-1 ring-border"
       >
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-foreground">เพิ่มรายการ</h2>
-          <span className="text-xs text-muted-foreground">{currentMember.name} เป็นคนจ่าย</span>
+          <h2 className="text-base font-semibold text-foreground">
+            {isIncome ? "เพิ่มรายรับ" : "เพิ่มรายการ"}
+          </h2>
+          <span className="text-xs text-muted-foreground">
+            {currentMember.name} {isIncome ? "เป็นคนรับ" : "เป็นคนจ่าย"}
+          </span>
+        </div>
+
+        {/* Expense ↔ Income switch (expense is the default/primary mode) */}
+        <div className="mt-3 grid grid-cols-2 rounded-2xl bg-secondary p-1">
+          {([
+            { id: "expense", label: "รายจ่าย" },
+            { id: "income", label: "รายรับ" },
+          ] as const).map((opt) => (
+            <button
+              type="button"
+              key={opt.id}
+              onClick={() => setKind(opt.id)}
+              className={`rounded-xl py-2 text-sm font-semibold transition ${
+                kind === opt.id
+                  ? "bg-card text-foreground shadow-sm ring-1 ring-border"
+                  : "text-muted-foreground"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
         </div>
 
         {/* Slip / receipt picker (hidden input, triggered by the camera icon) */}
@@ -253,7 +282,7 @@ export function AddTransaction({ categories, members, currentMember, onAdd, onAd
         <input
           value={detail}
           onChange={(e) => setDetail(e.target.value)}
-          placeholder="รายละเอียด เช่น ค่าข้าวเที่ยง"
+          placeholder={isIncome ? "รายละเอียด เช่น ขายของแบ่งกำไร" : "รายละเอียด เช่น ค่าข้าวเที่ยง"}
           className="mt-3 w-full rounded-2xl bg-secondary px-4 py-3.5 text-sm text-foreground outline-none ring-1 ring-transparent transition placeholder:text-muted-foreground focus:bg-card focus:ring-ring"
         />
 
@@ -293,7 +322,7 @@ export function AddTransaction({ categories, members, currentMember, onAdd, onAd
         {members.length > 1 && (
           <>
             <p className="mt-4 mb-2 text-xs font-medium text-muted-foreground">
-              {split === "request" ? "ใครต้องจ่ายคืน" : "ใครร่วมหารบ้าง"}
+              {isIncome ? "ใครได้ส่วนแบ่ง" : split === "request" ? "ใครต้องจ่ายคืน" : "ใครร่วมหารบ้าง"}
             </p>
             <div className="flex flex-wrap gap-2">
               {members.map((m) => {

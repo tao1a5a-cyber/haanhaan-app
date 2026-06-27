@@ -42,11 +42,14 @@ export function memberBalances(
 
   for (const t of transactions) {
     if (t.settled) continue
-    // payer fronted the whole amount
-    bal[t.payerId] = (bal[t.payerId] ?? 0) + t.amount
-    // each member is responsible for their share
+    // Income flips the flow: the receiver owes others their share of the
+    // earnings, so the whole entry is the negation of an expense.
+    const sign = t.kind === "income" ? -1 : 1
+    // payer fronted the whole amount (or received it, for income)
+    bal[t.payerId] = (bal[t.payerId] ?? 0) + sign * t.amount
+    // each member is responsible for (or entitled to) their share
     for (const [memberId, share] of Object.entries(t.shares ?? {})) {
-      bal[memberId] = (bal[memberId] ?? 0) - share
+      bal[memberId] = (bal[memberId] ?? 0) - sign * share
     }
   }
 

@@ -14,9 +14,12 @@ create extension if not exists "pgcrypto";
 -- ── Groups ───────────────────────────────────────────────
 -- A group is one shared ledger (e.g. "บ้านเรา", "ทริปเชียงใหม่").
 create table if not exists public.groups (
-  id         uuid        primary key default gen_random_uuid(),
-  name       text        not null,
-  created_at timestamptz not null default now()
+  id           uuid        primary key default gen_random_uuid(),
+  name         text        not null,
+  avatar_url   text,                               -- group image (public 'avatars' bucket)
+  host_user_id uuid        references auth.users (id) on delete set null,  -- creator (Host)
+  invite_token text        not null unique default encode(gen_random_bytes(8), 'hex'),
+  created_at   timestamptz not null default now()
 );
 
 -- ── Members ──────────────────────────────────────────────
@@ -24,6 +27,7 @@ create table if not exists public.groups (
 create table if not exists public.members (
   id         uuid        primary key default gen_random_uuid(),
   group_id   uuid        not null references public.groups (id) on delete cascade,
+  user_id    uuid        references auth.users (id) on delete set null,  -- Supabase Auth identity (null = placeholder member)
   name       text        not null,
   avatar_url text,                               -- Supabase Storage public URL
   tint       text,                               -- pastel background color (oklch string)
@@ -35,6 +39,11 @@ create table if not exists public.members (
 
 create index if not exists members_group_idx
   on public.members (group_id, created_at);
+
+-- One auth user maps to at most one member per group.
+create unique index if not exists members_group_user_idx
+  on public.members (group_id, user_id)
+  where user_id is not null;
 
 -- ── Transactions ─────────────────────────────────────────
 create table if not exists public.transactions (
@@ -57,11 +66,15 @@ create index if not exists transactions_group_idx
 -- ── Custom categories (global, shared across groups) ─────
 create table if not exists public.custom_categories (
   id         text        primary key,
+  member_id  uuid        references public.members (id) on delete cascade,  -- owner (null = legacy global)
   label      text        not null,
   emoji      text        not null default '📦',
   sort_order integer     not null,
   created_at timestamptz not null default now()
 );
+
+create index if not exists custom_categories_member_idx
+  on public.custom_categories (member_id, sort_order);
 
 -- ── Notifications ────────────────────────────────────────
 -- One row per recipient member who should be alerted about an event.

@@ -32,6 +32,8 @@ import {
   addMember,
   updateMember,
   removeMember,
+  claimMember,
+  releaseMember,
   fetchMemberPinHash,
   fetchTransactions,
   insertTransaction,
@@ -48,7 +50,7 @@ import {
 import { uploadSlip, getSlipUrl } from "@/lib/storage"
 import { memberBalances, myNet } from "@/lib/balances"
 import { verifyPin } from "@/lib/pin"
-import { signOut } from "@/lib/auth"
+import { signOut, getCurrentUser, onAuthChange } from "@/lib/auth"
 import { loadLastContext, saveLastContext, clearLastContext } from "@/lib/prefs"
 
 const tabTitles: Record<string, string> = {
@@ -72,15 +74,43 @@ export default function Page() {
   const [pending, setPending] = useState<{ member: Member; hash: string } | null>(null)
   // when re-entering, jump straight to the member picker for this group
   const [entryGroupId, setEntryGroupId] = useState<string | null>(null)
+  // signed-in Supabase account (shared cookie session)
+  const [authEmail, setAuthEmail] = useState<string | null>(null)
+  const [authUserId, setAuthUserId] = useState<string | null>(null)
 
-  // ── Bootstrap: load groups, then restore last context ───
+  // ── Auth gate: send unauthenticated visitors to /login ─────
+  // Also drives the header's signed-in email indicator + identity binding.
+  useEffect(() => {
+    if (!isSupabaseConfigured) return
+    getCurrentUser().then((u) => {
+      setAuthEmail(u?.email ?? null)
+      setAuthUserId(u?.id ?? null)
+      if (!u) window.location.href = "/login"
+    })
+    return onAuthChange((u) => {
+      setAuthEmail(u?.email ?? null)
+      setAuthUserId(u?.id ?? null)
+      if (!u) window.location.href = "/login"
+    })
+  }, [])
+
+  // ── Bootstrap: load groups, then pick where to land ─────
   useEffect(() => {
     async function boot() {
       if (isSupabaseConfigured) {
+        const me = await getCurrentUser()
         const gs = await fetchGroups()
         setGroups(gs)
 
-        // Reduce clicks: jump back into the last group + member the user used.
+        // 1) Email already bound to a member → enter that profile directly.
+        if (me) {
+          for (const g of gs) {
+            const mine = g.members.find((m) => m.userId === me.id)
+            if (mine) { setEntryGroupId(g.id); await enterAs(g, mine); setLoading(false); return }
+          }
+        }
+
+        // 2) Otherwise restore the last group + member used on this device.
         const last = loadLastContext()
         if (last) {
           const g = gs.find((x) => x.id === last.groupId)
@@ -244,6 +274,25 @@ export default function Page() {
     return m
   }
 
+  /** Remember "this email = this member" so next login enters directly. */
+  function bindMemberToMe(m: Member) {
+    if (!authUserId || m.userId) return // unauthenticated or already bound
+    claimMember(m.id, authUserId)
+    applyMemberUpdate(m.id, { userId: authUserId })
+  }
+
+  /** Settings: assign my email to a chosen member, moving it off any previous one. */
+  function handleClaimMember(memberId: string) {
+    if (!authUserId || !group) return
+    const prev = group.members.find((m) => m.userId === authUserId)
+    if (prev && prev.id !== memberId) {
+      releaseMember(prev.id)
+      applyMemberUpdate(prev.id, { userId: undefined })
+    }
+    claimMember(memberId, authUserId)
+    applyMemberUpdate(memberId, { userId: authUserId })
+  }
+
   async function enterAs(g: Group, m: Member) {
     const hash = await fetchMemberPinHash(m.id)
     if (hash) {
@@ -253,6 +302,7 @@ export default function Page() {
       setGroup(g)
       setMember(m)
       setTab("home")
+      bindMemberToMe(m)
     }
   }
 
@@ -321,14 +371,12 @@ export default function Page() {
     setTab("home")
   }
 
-  /** Sign out → clear cached context and return to group selection. */
+  /** Sign out → clear cached context and go to the login page. */
   async function handleLogout() {
     clearLastContext()
-    setEntryGroupId(null)
-    setMember(null)
-    setGroup(null)
-    setTab("home")
     await signOut()
+    // Hard navigation: ends the session and lands the user on /login.
+    window.location.href = "/login"
   }
 
   function handleMarkAllRead() {
@@ -355,7 +403,7 @@ export default function Page() {
       <PinEntry
         member={pending.member}
         checkPin={async (pin) => verifyPin(pin, pending.hash, pending.member.pinSalt ?? pending.member.id)}
-        onSuccess={() => { setMember(pending.member); setPending(null); setTab("home") }}
+        onSuccess={() => { bindMemberToMe(pending.member); setMember(pending.member); setPending(null); setTab("home") }}
         onCancel={() => { setPending(null); setGroup(null) }}
       />
     )
@@ -396,6 +444,7 @@ export default function Page() {
               groups={groups}
               member={member}
               notifications={myNotifications}
+              authEmail={authEmail}
               onSelectGroup={handleSelectGroup}
               onBackToHome={handleBackToHome}
               onLogout={handleLogout}
@@ -454,6 +503,9 @@ export default function Page() {
             embedded
             group={group}
             member={member}
+            authEmail={authEmail}
+            authUserId={authUserId}
+            onClaimMember={handleClaimMember}
             onSave={handleSettingsSave}
             onAddMember={handleAddGroupMember}
             onRemoveMember={handleRemoveMember}
@@ -477,7 +529,7 @@ export default function Page() {
           <div className="relative max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-[2rem] bg-background pb-4 shadow-2xl ring-1 ring-border animate-in slide-in-from-bottom-4 fade-in duration-300 sm:rounded-[2rem]">
             <div className="sticky top-0 z-10 flex items-center justify-between bg-background/90 px-5 pb-2 pt-4 backdrop-blur-sm">
               <div className="absolute left-1/2 top-1.5 h-1.5 w-10 -translate-x-1/2 rounded-full bg-border sm:hidden" />
-              <h2 className="text-base font-semibold text-foreground">เพิ่มรายจ่าย</h2>
+              <h2 className="text-base font-semibold text-foreground">เพิ่มรายการ</h2>
               <button
                 type="button"
                 onClick={() => setShowAddForm(false)}

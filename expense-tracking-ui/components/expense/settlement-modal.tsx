@@ -40,24 +40,31 @@ export function SettlementModal({
   const nameOf = (id: string) => memberById.get(id)?.name ?? "—"
 
   const summary = useMemo(() => {
-    const total = unsettled.reduce((s, t) => s + t.amount, 0)
+    // Expenses vs income are different flows — keep them apart so the spend
+    // total + category breakdown aren't inflated by shared earnings.
+    const expenses = unsettled.filter((t) => t.kind !== "income")
+    const incomeTotal = unsettled
+      .filter((t) => t.kind === "income")
+      .reduce((s, t) => s + t.amount, 0)
+
+    const total = expenses.reduce((s, t) => s + t.amount, 0)
     const paidByMember = new Map<string, { paid: number; count: number }>()
     for (const m of members) paidByMember.set(m.id, { paid: 0, count: 0 })
-    for (const t of unsettled) {
+    for (const t of expenses) {
       const e = paidByMember.get(t.payerId) ?? { paid: 0, count: 0 }
       e.paid += t.amount; e.count += 1
       paidByMember.set(t.payerId, e)
     }
 
     const byCatMap = new Map<string, number>()
-    for (const t of unsettled) byCatMap.set(t.categoryId, (byCatMap.get(t.categoryId) ?? 0) + t.amount)
+    for (const t of expenses) byCatMap.set(t.categoryId, (byCatMap.get(t.categoryId) ?? 0) + t.amount)
     const byCat = [...byCatMap.entries()]
       .map(([id, value]) => ({ cat: getCategory(id, categories), value }))
       .sort((a, b) => b.value - a.value)
       .slice(0, 5)
 
     const slipCount = unsettled.filter((t) => t.hasSlip).length
-    return { total, paidByMember, byCat, slipCount }
+    return { total, incomeTotal, paidByMember, byCat, slipCount }
   }, [unsettled, members, categories])
 
   const transfers = useMemo(() => simplifyDebts(balances), [balances])
@@ -98,6 +105,7 @@ export function SettlementModal({
                 </div>
                 <p className="mt-1 text-xs text-primary-foreground/70">
                   {unsettled.length} รายการ{summary.slipCount > 0 ? ` · มีสลิป ${summary.slipCount} ใบ` : ""}
+                  {summary.incomeTotal > 0 ? ` · รายรับ ฿${formatBaht(summary.incomeTotal)}` : ""}
                 </p>
 
                 <div className="mt-4 grid grid-cols-2 gap-2.5">

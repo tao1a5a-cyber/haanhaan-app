@@ -55,8 +55,11 @@ export function RecentList({
             const mode = splitModes.find((m) => m.id === tx.split)
             const myShare = tx.shares?.[currentMemberId] ?? 0
             const isPayer = tx.payerId === currentMemberId
-            // + you are owed this much, − you owe this much
-            const delta = tx.settled ? 0 : isPayer ? tx.amount - myShare : -myShare
+            const isIncome = tx.kind === "income"
+            // + you are owed this much, − you owe this much.
+            // Income flips the flow: the receiver owes others their share.
+            const sign = isIncome ? -1 : 1
+            const delta = tx.settled ? 0 : sign * (isPayer ? tx.amount - myShare : -myShare)
             return (
               <li
                 key={tx.id}

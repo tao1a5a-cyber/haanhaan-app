@@ -35,6 +35,8 @@ type Props = {
   groups: Group[]
   member: Member
   notifications: AppNotification[]
+  /** email of the signed-in Supabase account (null when not authenticated) */
+  authEmail?: string | null
   /** switch the active group (top-left dropdown) */
   onSelectGroup?: (group: Group) => void
   /** go back to the "who are you?" profile selection page */
@@ -62,6 +64,7 @@ export function AppHeader({
   groups,
   member,
   notifications,
+  authEmail,
   onSelectGroup,
   onBackToHome,
   onLogout,
@@ -158,6 +161,12 @@ export function AppHeader({
                       <p className="truncate text-xs text-muted-foreground">{group.name}</p>
                     </div>
                   </div>
+                  {authEmail && (
+                    <div className="px-2.5 pb-1">
+                      <p className="text-[11px] text-muted-foreground">เข้าสู่ระบบด้วย</p>
+                      <p className="truncate text-xs font-medium text-foreground">{authEmail}</p>
+                    </div>
+                  )}
                   <div className="my-1 h-px bg-border" />
                   <button
                     type="button"

@@ -20,12 +20,17 @@ type Props = {
   onRenameGroup: (name: string) => void
   /** persist the group's avatar URL ("" to remove) */
   onSaveGroupAvatar: (avatarUrl: string) => void
+  /** signed-in account email + id, for the identity-mapping section */
+  authEmail?: string | null
+  authUserId?: string | null
+  /** bind the signed-in email to a member ("this member is me") */
+  onClaimMember?: (memberId: string) => void
   /** when true, render inline as a tab page instead of a floating modal */
   embedded?: boolean
   onClose?: () => void
 }
 
-export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMember, onRenameGroup, onSaveGroupAvatar, embedded, onClose }: Props) {
+export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMember, onRenameGroup, onSaveGroupAvatar, authEmail, authUserId, onClaimMember, embedded, onClose }: Props) {
   const [name, setName] = useState(member.name)
   const [avatar, setAvatar] = useState(member.avatar)
   const [avatarBlob, setAvatarBlob] = useState<Blob | null>(null)
@@ -285,13 +290,33 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                 />
 
                 <p className="mb-2 mt-4 text-xs font-semibold text-muted-foreground">สมาชิก ({group.members.length})</p>
+                {authEmail && (
+                  <p className="mb-2 text-[11px] leading-relaxed text-muted-foreground">
+                    ผูกอีเมลของคุณ (<span className="font-medium text-foreground">{authEmail}</span>) กับสมาชิก
+                    เพื่อให้ครั้งหน้าเข้าโปรไฟล์นี้อัตโนมัติ
+                  </p>
+                )}
                 <ul className="space-y-2">
-                  {group.members.map((m) => (
+                  {group.members.map((m) => {
+                    const mine = !!authUserId && m.userId === authUserId
+                    const claimedByOther = !!m.userId && !mine
+                    return (
                     <li key={m.id} className="flex items-center gap-3 rounded-xl bg-secondary px-3 py-2">
                       <MemberAvatar member={m} size={32} />
                       <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
                         {m.name}{m.id === member.id ? " (คุณ)" : ""}
+                        {mine && <span className="ml-1.5 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-medium text-accent">บัญชีของคุณ</span>}
+                        {claimedByOther && <span className="ml-1.5 rounded-full bg-card px-2 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-border">ผูกอีเมลแล้ว</span>}
                       </span>
+                      {authUserId && !mine && !claimedByOther && onClaimMember && (
+                        <button
+                          type="button"
+                          onClick={() => onClaimMember(m.id)}
+                          className="shrink-0 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground transition active:scale-95"
+                        >
+                          นี่คือฉัน
+                        </button>
+                      )}
                       {m.id !== member.id && (
                         <button
                           type="button"
@@ -303,7 +328,8 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                         </button>
                       )}
                     </li>
-                  ))}
+                    )
+                  })}
                 </ul>
 
                 <div className="mt-3 flex items-center gap-2">
