@@ -35,7 +35,20 @@
 --
 -- A rollback script is at the very bottom (commented out).
 
--- ── 0. Grant table (who may access which group via a code) ───────────────
+-- ── 0. Prerequisite columns (from migration 0002, if it was never run) ───
+-- This project's groups/members tables may predate the auth-identity columns.
+-- Add them idempotently so the policies below can reference them.
+alter table public.groups
+  add column if not exists host_user_id uuid references auth.users (id) on delete set null;
+
+alter table public.members
+  add column if not exists user_id uuid references auth.users (id) on delete set null;
+
+create unique index if not exists members_group_user_idx
+  on public.members (group_id, user_id)
+  where user_id is not null;
+
+-- ── 1. Grant table (who may access which group via a code) ───────────────
 -- Kept separate from `members` so room guests don't pollute a group's
 -- member list. Touched only by the SECURITY DEFINER functions below, so it
 -- has RLS enabled with NO policies → no direct client access at all.
@@ -48,7 +61,7 @@ create table if not exists public.room_access (
 
 alter table public.room_access enable row level security;
 
--- ── 1. Membership predicate ──────────────────────────────────────────────
+-- ── 2. Membership predicate ──────────────────────────────────────────────
 -- True when the current auth user hosts `gid`, is a member of it, or has a
 -- room-code grant for it. SECURITY DEFINER so its internal reads bypass RLS
 -- (this is what prevents infinite recursion inside the members policies).
@@ -71,7 +84,7 @@ $$;
 
 grant execute on function public.is_group_member(uuid) to anon, authenticated;
 
--- ── 2. join_room(code): the ONLY way a guest gains access to a group ─────
+-- ── 3. join_room(code): the ONLY way a guest gains access to a group ─────
 -- Looks up the group by code (bypassing RLS), records a grant for the
 -- current (anonymous or real) auth user, and returns the group id.
 -- Returns NULL for an unknown code. Requires the caller to be signed in
@@ -108,7 +121,7 @@ $$;
 
 grant execute on function public.join_room(text) to anon, authenticated;
 
--- ── 3. Auto-stamp the creator as host ────────────────────────────────────
+-- ── 4. Auto-stamp the creator as host ────────────────────────────────────
 -- So a freshly-created group is owned by whoever made it, even though the
 -- frontend's createGroup() doesn't pass host_user_id explicitly.
 create or replace function public.set_group_host()
@@ -130,10 +143,15 @@ create trigger groups_set_host
   before insert on public.groups
   for each row execute function public.set_group_host();
 
--- ── 4. Replace permissive policies with scoped ones ──────────────────────
+-- ── 5. Replace permissive policies with scoped ones ──────────────────────
+-- Each new policy is dropped-if-exists first so this script is safe to re-run.
 
 -- groups ------------------------------------------------------------------
-drop policy if exists "household_groups" on public.groups;
+drop policy if exists "household_groups"     on public.groups;
+drop policy if exists "groups_select_member" on public.groups;
+drop policy if exists "groups_insert_own"    on public.groups;
+drop policy if exists "groups_update_host"   on public.groups;
+drop policy if exists "groups_delete_host"   on public.groups;
 
 create policy "groups_select_member" on public.groups
   for select using (public.is_group_member(id));
@@ -148,21 +166,24 @@ create policy "groups_delete_host" on public.groups
   for delete using (host_user_id = auth.uid());
 
 -- members -----------------------------------------------------------------
-drop policy if exists "household_members" on public.members;
+drop policy if exists "household_members"    on public.members;
+drop policy if exists "members_all_in_group" on public.members;
 
 create policy "members_all_in_group" on public.members
   for all using (public.is_group_member(group_id))
           with check (public.is_group_member(group_id));
 
 -- transactions ------------------------------------------------------------
-drop policy if exists "household_transactions" on public.transactions;
+drop policy if exists "household_transactions"     on public.transactions;
+drop policy if exists "transactions_all_in_group"  on public.transactions;
 
 create policy "transactions_all_in_group" on public.transactions
   for all using (public.is_group_member(group_id))
           with check (public.is_group_member(group_id));
 
 -- notifications -----------------------------------------------------------
-drop policy if exists "household_notifications" on public.notifications;
+drop policy if exists "household_notifications"    on public.notifications;
+drop policy if exists "notifications_all_in_group" on public.notifications;
 
 create policy "notifications_all_in_group" on public.notifications
   for all using (public.is_group_member(group_id))
@@ -172,6 +193,8 @@ create policy "notifications_all_in_group" on public.notifications
 -- Scoped through the owning member's group. Legacy global rows (member_id
 -- null) stay readable to any signed-in user but can't be created anymore.
 drop policy if exists "household_categories" on public.custom_categories;
+drop policy if exists "categories_select"    on public.custom_categories;
+drop policy if exists "categories_write"     on public.custom_categories;
 
 create policy "categories_select" on public.custom_categories
   for select using (
@@ -195,20 +218,30 @@ create policy "categories_write" on public.custom_categories
     )
   );
 
--- ── 5. (Optional) Backfill host for orphaned groups ──────────────────────
--- If you have groups with a null host_user_id but a member already bound to
--- your account, adopt the earliest such member's user as host. Review before
--- running — uncomment to use.
+-- ── 6. (Required here) Backfill host for orphaned groups ─────────────────
+-- This project never ran migration 0002, so EVERY existing group currently
+-- has a null host_user_id and no member is bound to a user. Without a host,
+-- the policies above make existing groups invisible. Pick ONE option:
 --
--- update public.groups g
---   set host_user_id = sub.user_id
---   from (
---     select distinct on (group_id) group_id, user_id
---     from public.members
---     where user_id is not null
---     order by group_id, created_at
---   ) sub
---   where g.id = sub.group_id and g.host_user_id is null;
+-- Option A — single owner: claim all existing groups for your account.
+--   First find your auth uid:
+--     select id, email from auth.users order by created_at;
+--   Then (replace the uuid with your own):
+--     update public.groups
+--       set host_user_id = '00000000-0000-0000-0000-000000000000'
+--       where host_user_id is null;
+--
+-- Option B — already-bound members: if some members.user_id are set (e.g. you
+-- claimed members in-app before locking down), adopt the earliest as host:
+--   update public.groups g
+--     set host_user_id = sub.user_id
+--     from (
+--       select distinct on (group_id) group_id, user_id
+--       from public.members
+--       where user_id is not null
+--       order by group_id, created_at
+--     ) sub
+--     where g.id = sub.group_id and g.host_user_id is null;
 
 -- ============================================================================
 -- ROLLBACK (restore the permissive model) — uncomment and run if needed:
