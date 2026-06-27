@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, useState } from "react"
-import { X, Eye, EyeOff, Camera, Loader2, UserCog, Users, Palette, Lock, Trash2, UserPlus, Check, ImagePlus } from "lucide-react"
+import { X, Eye, EyeOff, Camera, Loader2, UserCog, Users, Palette, Lock, Trash2, UserPlus, Check, ImagePlus, KeyRound, Copy } from "lucide-react"
 import { isCustomAvatar } from "./users"
 import { MemberAvatar } from "./member-avatar"
 import { GroupAvatar } from "./group-avatar"
@@ -25,12 +25,16 @@ type Props = {
   authUserId?: string | null
   /** bind the signed-in email to a member ("this member is me") */
   onClaimMember?: (memberId: string) => void
+  /** mint/reveal the group's shareable Room Code; returns the code or null */
+  onGenerateRoomCode?: () => Promise<string | null>
+  /** whether the Room Code feature is available (signed-in, non-guest) */
+  roomCodeEnabled?: boolean
   /** when true, render inline as a tab page instead of a floating modal */
   embedded?: boolean
   onClose?: () => void
 }
 
-export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMember, onRenameGroup, onSaveGroupAvatar, authEmail, authUserId, onClaimMember, embedded, onClose }: Props) {
+export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMember, onRenameGroup, onSaveGroupAvatar, authEmail, authUserId, onClaimMember, onGenerateRoomCode, roomCodeEnabled, embedded, onClose }: Props) {
   const [name, setName] = useState(member.name)
   const [avatar, setAvatar] = useState(member.avatar)
   const [avatarBlob, setAvatarBlob] = useState<Blob | null>(null)
@@ -53,6 +57,33 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
 
   const [groupName, setGroupName] = useState(group.name)
   const [newMember, setNewMember] = useState("")
+
+  // ── Room Code (shareable, cloud-only) ──
+  const [roomCode, setRoomCode] = useState(group.roomCode ?? "")
+  const [roomBusy, setRoomBusy] = useState(false)
+  const [roomCopied, setRoomCopied] = useState(false)
+
+  async function handleGenerateRoomCode() {
+    if (!onGenerateRoomCode) return
+    setRoomBusy(true)
+    try {
+      const code = await onGenerateRoomCode()
+      if (code) setRoomCode(code)
+    } finally {
+      setRoomBusy(false)
+    }
+  }
+
+  async function handleCopyRoomCode() {
+    if (!roomCode) return
+    try {
+      await navigator.clipboard.writeText(roomCode)
+      setRoomCopied(true)
+      setTimeout(() => setRoomCopied(false), 1500)
+    } catch {
+      /* clipboard blocked — ignore */
+    }
+  }
 
   async function handleAvatarFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -353,6 +384,41 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                   </button>
                 </div>
               </SectionCard>
+
+              {/* ── Room Code section (share this group with guests) ── */}
+              {roomCodeEnabled && (
+                <SectionCard icon={<KeyRound className="size-4" />} title="รหัสห้อง (Room Code)" accent={activeTheme.vars.accent}>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    แชร์รหัสนี้ให้เพื่อน เพื่อให้เข้าถึงห้องนี้ได้จากหน้าเข้าสู่ระบบ
+                    โดยไม่ต้องสมัครบัญชี
+                  </p>
+                  {roomCode ? (
+                    <div className="mt-3 flex items-center gap-2">
+                      <div className="flex-1 rounded-xl bg-secondary px-4 py-3 text-center text-lg font-bold tracking-[0.3em] text-foreground">
+                        {roomCode}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleCopyRoomCode}
+                        aria-label="คัดลอกรหัสห้อง"
+                        className="grid size-12 shrink-0 place-items-center rounded-xl bg-accent text-accent-foreground shadow-sm transition active:scale-95"
+                      >
+                        {roomCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleGenerateRoomCode}
+                      disabled={roomBusy}
+                      className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-accent py-3 text-sm font-semibold text-accent-foreground shadow-sm transition active:scale-[0.98] disabled:opacity-60"
+                    >
+                      {roomBusy ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />}
+                      สร้างรหัสห้อง
+                    </button>
+                  )}
+                </SectionCard>
+              )}
 
               {/* Save */}
               <button

@@ -1,16 +1,13 @@
 "use client"
 
-import { useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 
-// Minimal sign-in: Google OAuth + Email Magic Link, both via @supabase/ssr.
+// Cloud sign-in: Google OAuth via @supabase/ssr (shared cookie session).
 export function LoginButton() {
   const supabase = createClient()
-  const [email, setEmail] = useState("")
-  const [sent, setSent] = useState(false)
 
-  // Carry the guard's `?next=` through the OAuth/magic-link round-trip so the
-  // user lands back on the page they were redirected away from.
+  // Carry the guard's `?next=` through the OAuth round-trip so the user lands
+  // back on the page they were redirected away from.
   const next =
     typeof window !== "undefined"
       ? new URLSearchParams(window.location.search).get("next")
@@ -25,15 +22,6 @@ export function LoginButton() {
     })
   }
 
-  async function signInWithEmail(e: React.FormEvent) {
-    e.preventDefault()
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: { emailRedirectTo: redirectTo },
-    })
-    if (!error) setSent(true)
-  }
-
   return (
     <div className="flex w-full flex-col gap-4">
       <button
@@ -43,37 +31,6 @@ export function LoginButton() {
         <GoogleIcon />
         เข้าสู่ระบบด้วย Google
       </button>
-
-      <div className="flex items-center gap-3">
-        <span className="h-px flex-1 bg-border" />
-        <span className="text-xs text-muted-foreground">หรือ</span>
-        <span className="h-px flex-1 bg-border" />
-      </div>
-
-      {sent ? (
-        <div className="flex flex-col items-center gap-1 rounded-2xl bg-accent/10 px-4 py-5 text-center">
-          <span className="text-2xl">✉️</span>
-          <p className="text-sm font-medium text-foreground">ส่งลิงก์ไปที่อีเมลแล้ว</p>
-          <p className="text-xs text-muted-foreground">เปิดอีเมลเพื่อเข้าสู่ระบบได้เลย</p>
-        </div>
-      ) : (
-        <form onSubmit={signInWithEmail} className="flex flex-col gap-2.5">
-          <input
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="อีเมลของคุณ"
-            className="rounded-2xl border bg-background px-4 py-3 text-sm outline-none transition focus:ring-2 focus:ring-accent/40"
-          />
-          <button
-            type="submit"
-            className="rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground shadow-sm transition hover:opacity-90 active:scale-[0.98]"
-          >
-            ส่งลิงก์เข้าสู่ระบบ
-          </button>
-        </form>
-      )}
     </div>
   )
 }

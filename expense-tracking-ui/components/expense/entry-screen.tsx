@@ -5,6 +5,7 @@ import Image from "next/image"
 import { ChevronLeft, Plus, Users, ArrowRight, X, UserPlus } from "lucide-react"
 import { MemberAvatar } from "./member-avatar"
 import { GroupAvatar } from "./group-avatar"
+import { CreatedByFooter } from "@/components/created-by-footer"
 import type { Group, Member } from "./types"
 
 type Props = {
@@ -93,7 +94,8 @@ export function EntryScreen({ groups, initialGroupId, onEnter, onCreateGroup, on
       </div>
 
       {/* ── Sheet ── */}
-      <div className="relative mt-2 flex-1 rounded-t-[2.5rem] bg-card/85 px-6 pb-10 pt-7 shadow-[0_-16px_44px_-20px_oklch(0.45_0.08_40/0.45)] ring-1 ring-white/50 backdrop-blur-md">
+      <div className="relative mt-2 flex flex-1 flex-col rounded-t-[2.5rem] bg-card/85 px-6 pb-8 pt-7 shadow-[0_-16px_44px_-20px_oklch(0.45_0.08_40/0.45)] ring-1 ring-white/50 backdrop-blur-md">
+        <div className="flex-1">
         {step === "group" ? (
           <>
             <div className="mb-5 flex items-center justify-between">
@@ -192,6 +194,9 @@ export function EntryScreen({ groups, initialGroupId, onEnter, onCreateGroup, on
             </div>
           </>
         )}
+        </div>
+
+        <CreatedByFooter className="mt-8 pt-2" />
       </div>
 
       {/* ── Create-group / add-member sheet ── */}

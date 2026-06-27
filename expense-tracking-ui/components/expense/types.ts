@@ -28,6 +28,8 @@ export type Group = {
   hostUserId?: string
   /** unique token used to build the shareable invite link */
   inviteToken?: string
+  /** short, human-friendly Room Code guests type on the login page to join */
+  roomCode?: string
 }
 
 export type Transaction = {

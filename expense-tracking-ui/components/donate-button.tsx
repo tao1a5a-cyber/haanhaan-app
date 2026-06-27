@@ -29,8 +29,10 @@ export function DonateButton() {
             <p className="text-sm font-semibold text-foreground">
               สนับสนุนการพัฒนาแอป
             </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              สนับสนุนการพัฒนาแอปเป็นค่ากาแฟได้ที่พร้อมเพย์ด้านล่างนี้ครับ
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              สนับสนุนการพัฒนาแอปเป็นค่ากาแฟ
+              <br />
+              ได้ที่พร้อมเพย์ด้านล่างนี้ครับ
             </p>
             <Image
               src="/donate-qr.jpg"

@@ -1,10 +1,11 @@
 import Image from "next/image"
 import { LoginButton } from "@/components/login-button"
-import { DonateButton } from "@/components/donate-button"
+import { GuestAccess } from "@/components/guest-access"
+import { CreatedByFooter } from "@/components/created-by-footer"
 
 export default function LoginPage() {
   return (
-    <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-background px-6">
+    <main className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-background px-6 py-16">
       {/* soft warm blobs for a friendly backdrop */}
       <div className="pointer-events-none absolute -top-24 -left-20 size-72 rounded-full bg-accent/20 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-24 -right-16 size-72 rounded-full bg-primary/15 blur-3xl" />
@@ -29,15 +30,15 @@ export default function LoginPage() {
           <LoginButton />
         </div>
 
+        {/* Guest mode + Room Code entry */}
+        <GuestAccess />
+
         <p className="mt-5 text-center text-[11px] leading-relaxed text-muted-foreground">
           การเข้าสู่ระบบถือว่ายอมรับเงื่อนไขการใช้งาน
         </p>
       </div>
 
-      <footer className="absolute bottom-4 flex items-center text-center text-xs text-muted-foreground">
-        Created by <span className="ml-1 font-medium">Yomoeyo</span>
-        <DonateButton />
-      </footer>
+      <CreatedByFooter className="mt-10 mb-6 sm:mb-8" />
     </main>
   )
 }

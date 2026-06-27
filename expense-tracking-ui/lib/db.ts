@@ -3,6 +3,8 @@ import { getSlipUrls } from "./storage"
 import { makeCustomCategory, type Category } from "@/components/expense/categories"
 import type { Group, Member, Transaction } from "@/components/expense/types"
 import type { AppNotification } from "@/components/expense/notifications"
+import { isGuestMode } from "./access-mode"
+import * as guest from "./guest-store"
 
 // ── Groups & Members ──────────────────────────────────────
 
@@ -28,11 +30,13 @@ function mapGroup(row: any, members: Member[]): Group {
     avatar: row.avatar_url ?? "",
     hostUserId: row.host_user_id ?? undefined,
     inviteToken: row.invite_token ?? undefined,
+    roomCode: row.room_code ?? undefined,
   }
 }
 
 /** Load every group with its members nested. */
 export async function fetchGroups(): Promise<Group[]> {
+  if (isGuestMode()) return guest.guestFetchGroups()
   const db = tryGetSupabase()
   if (!db) return []
 
@@ -101,8 +105,60 @@ export async function fetchGroupByToken(token: string): Promise<Group | null> {
   return mapGroup(g, (memberRows ?? []).map(mapMember))
 }
 
+// ── Room codes ────────────────────────────────────────────
+// A Room Code is a short, human-typable handle (e.g. "K4P9ZQ") that points at
+// one cloud group. Guests enter it on the login page to browse that group
+// without creating their own account (RLS is permissive for the anon role).
+
+/** Characters used for room codes — omits easily-confused 0/O/1/I. */
+const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+function randomRoomCode(len = 6): string {
+  let out = ""
+  const bytes = crypto.getRandomValues(new Uint8Array(len))
+  for (let i = 0; i < len; i++) out += ROOM_CODE_ALPHABET[bytes[i] % ROOM_CODE_ALPHABET.length]
+  return out
+}
+
+/** Look up a group by its Room Code, with members nested (null if not found). */
+export async function fetchGroupByRoomCode(code: string): Promise<Group | null> {
+  const db = tryGetSupabase()
+  if (!db) return null
+  const normalized = code.trim().toUpperCase()
+  if (!normalized) return null
+  const { data: g, error } = await db.from("groups").select("*").eq("room_code", normalized).maybeSingle()
+  if (error) { console.error("fetchGroupByRoomCode", error); return null }
+  if (!g) return null
+  const { data: memberRows, error: mErr } = await db
+    .from("members")
+    .select("*")
+    .eq("group_id", (g as any).id)
+    .order("created_at", { ascending: true })
+  if (mErr) { console.error("fetchGroupByRoomCode members", mErr); return null }
+  return mapGroup(g, (memberRows ?? []).map(mapMember))
+}
+
+/**
+ * Return the group's existing Room Code, or mint + persist a fresh unique one.
+ * Retries on the rare unique-index collision. Returns null on hard failure.
+ */
+export async function ensureRoomCode(groupId: string, existing?: string): Promise<string | null> {
+  if (existing) return existing
+  const db = tryGetSupabase()
+  if (!db) return null
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = randomRoomCode()
+    const { error } = await db.from("groups").update({ room_code: code }).eq("id", groupId)
+    if (!error) return code
+    // 23505 = unique_violation → another group grabbed this code, try again.
+    if ((error as any).code !== "23505") { console.error("ensureRoomCode", error); return null }
+  }
+  return null
+}
+
 /** Create a group owned by `hostUserId`; returns the new group (with invite token) or null. */
 export async function createGroup(name: string, hostUserId?: string): Promise<Group | null> {
+  if (isGuestMode()) return guest.guestCreateGroup(name)
   const db = tryGetSupabase()
   if (!db) return null
   const { data, error } = await db
@@ -115,6 +171,7 @@ export async function createGroup(name: string, hostUserId?: string): Promise<Gr
 }
 
 export async function renameGroup(groupId: string, name: string) {
+  if (isGuestMode()) return guest.guestRenameGroup(groupId, name)
   const db = tryGetSupabase()
   if (!db) return
   const { error } = await db.from("groups").update({ name }).eq("id", groupId)
@@ -123,6 +180,7 @@ export async function renameGroup(groupId: string, name: string) {
 
 /** Set (or clear with "") the group's avatar image URL. */
 export async function updateGroupAvatar(groupId: string, avatarUrl: string) {
+  if (isGuestMode()) return guest.guestUpdateGroupAvatar(groupId, avatarUrl)
   const db = tryGetSupabase()
   if (!db) return
   const { error } = await db.from("groups").update({ avatar_url: avatarUrl || null }).eq("id", groupId)
@@ -134,6 +192,7 @@ export async function addMember(
   groupId: string,
   m: { name: string; avatar?: string; tint: string; themeId?: string },
 ): Promise<Member | null> {
+  if (isGuestMode()) return guest.guestAddMember(groupId, m)
   const db = tryGetSupabase()
   if (!db) return null
   const { data, error } = await db
@@ -156,6 +215,7 @@ export async function updateMember(
   updated: Partial<Member>,
   pinHash?: string,
 ) {
+  if (isGuestMode()) return guest.guestUpdateMember(memberId, updated)
   const db = tryGetSupabase()
   if (!db) return
   const { error } = await db
@@ -192,6 +252,7 @@ export async function releaseMember(memberId: string) {
 }
 
 export async function removeMember(memberId: string) {
+  if (isGuestMode()) return guest.guestRemoveMember(memberId)
   const db = tryGetSupabase()
   if (!db) return
   const { error } = await db.from("members").delete().eq("id", memberId)
@@ -200,6 +261,7 @@ export async function removeMember(memberId: string) {
 
 /** Fetch a member's stored PIN hash (null if none). */
 export async function fetchMemberPinHash(memberId: string): Promise<string | null> {
+  if (isGuestMode()) return null
   const db = tryGetSupabase()
   if (!db) return null
   const { data, error } = await db
@@ -214,6 +276,7 @@ export async function fetchMemberPinHash(memberId: string): Promise<string | nul
 // ── Transactions (group-scoped) ───────────────────────────
 
 export async function fetchTransactions(groupId: string): Promise<Transaction[]> {
+  if (isGuestMode()) return guest.guestFetchTransactions(groupId)
   const db = tryGetSupabase()
   if (!db) return []
 
@@ -258,6 +321,7 @@ function normalizeShares(raw: any): Record<string, number> {
 }
 
 export async function insertTransaction(tx: Transaction) {
+  if (isGuestMode()) return guest.guestInsertTransaction(tx)
   const db = tryGetSupabase()
   if (!db) return
   const { error } = await db.from("transactions").insert({
@@ -278,6 +342,7 @@ export async function insertTransaction(tx: Transaction) {
 }
 
 export async function updateTransaction(tx: Transaction) {
+  if (isGuestMode()) return guest.guestUpdateTransaction(tx)
   const db = tryGetSupabase()
   if (!db) return
   const { error } = await db
@@ -297,6 +362,7 @@ export async function updateTransaction(tx: Transaction) {
 }
 
 export async function deleteTransaction(txId: string) {
+  if (isGuestMode()) return guest.guestDeleteTransaction(txId)
   const db = tryGetSupabase()
   if (!db) return
   const { error } = await db.from("transactions").delete().eq("id", txId)
@@ -304,6 +370,7 @@ export async function deleteTransaction(txId: string) {
 }
 
 export async function settleAllTransactions(groupId: string) {
+  if (isGuestMode()) return guest.guestSettleAll(groupId)
   const db = tryGetSupabase()
   if (!db) return
   const { error } = await db
@@ -321,6 +388,7 @@ export async function settleAllTransactions(groupId: string) {
  * stay visible to everyone as a shared fallback.
  */
 export async function fetchCustomCategories(memberId?: string): Promise<Category[]> {
+  if (isGuestMode()) return []
   const db = tryGetSupabase()
   if (!db) return []
 
@@ -345,6 +413,7 @@ export async function fetchCustomCategories(memberId?: string): Promise<Category
 }
 
 export async function insertCustomCategory(cat: Category, sortOrder: number, memberId?: string) {
+  if (isGuestMode()) return
   const db = tryGetSupabase()
   if (!db) return
   const base = { id: cat.id, label: cat.label, emoji: cat.emoji ?? "📦", sort_order: sortOrder }
@@ -376,6 +445,7 @@ export function mapNotificationRow(row: any): AppNotification {
 
 /** Load the most recent notifications addressed to a member. */
 export async function fetchNotifications(memberId: string): Promise<AppNotification[]> {
+  if (isGuestMode()) return []
   const db = tryGetSupabase()
   if (!db) return []
   const { data, error } = await db
@@ -390,6 +460,7 @@ export async function fetchNotifications(memberId: string): Promise<AppNotificat
 
 /** Insert many notifications at once (fan-out to every other group member). */
 export async function insertNotifications(list: AppNotification[]) {
+  if (isGuestMode()) return
   const db = tryGetSupabase()
   if (!db || list.length === 0) return
   const { error } = await db.from("notifications").insert(
@@ -409,6 +480,7 @@ export async function insertNotifications(list: AppNotification[]) {
 }
 
 export async function markNotificationsRead(memberId: string) {
+  if (isGuestMode()) return
   const db = tryGetSupabase()
   if (!db) return
   const { error } = await db

@@ -26,6 +26,8 @@ import type { AppNotification } from "@/components/expense/notifications"
 import { isSupabaseConfigured, tryGetSupabase } from "@/lib/supabase"
 import {
   fetchGroups,
+  fetchGroupByRoomCode,
+  ensureRoomCode,
   createGroup,
   renameGroup,
   updateGroupAvatar,
@@ -52,6 +54,8 @@ import { memberBalances, myNet } from "@/lib/balances"
 import { verifyPin } from "@/lib/pin"
 import { signOut, getCurrentUser, onAuthChange } from "@/lib/auth"
 import { loadLastContext, saveLastContext, clearLastContext } from "@/lib/prefs"
+import { isGuestMode, getRoomCode, exitLocalModes, GUEST_TX_LIMIT } from "@/lib/access-mode"
+import { guestSeedIfEmpty, guestTransactionCount } from "@/lib/guest-store"
 
 const tabTitles: Record<string, string> = {
   summary: "สรุปค่าใช้จ่าย",
@@ -82,6 +86,9 @@ export default function Page() {
   // Also drives the header's signed-in email indicator + identity binding.
   useEffect(() => {
     if (!isSupabaseConfigured) return
+    // Guest (offline) and Room (code) visitors are intentionally not signed in —
+    // don't bounce them to /login.
+    if (isGuestMode() || getRoomCode()) return
     getCurrentUser().then((u) => {
       setAuthEmail(u?.email ?? null)
       setAuthUserId(u?.id ?? null)
@@ -97,17 +104,19 @@ export default function Page() {
   // ── Bootstrap: load groups, then pick where to land ─────
   useEffect(() => {
     async function boot() {
-      if (isSupabaseConfigured) {
-        const me = await getCurrentUser()
+      // A real signed-in account always wins over any local (guest/room) flag.
+      const me = isSupabaseConfigured ? await getCurrentUser() : null
+      if (me) {
+        exitLocalModes()
+        setAuthEmail(me.email ?? null)
+        setAuthUserId(me.id ?? null)
         const gs = await fetchGroups()
         setGroups(gs)
 
         // 1) Email already bound to a member → enter that profile directly.
-        if (me) {
-          for (const g of gs) {
-            const mine = g.members.find((m) => m.userId === me.id)
-            if (mine) { setEntryGroupId(g.id); await enterAs(g, mine); setLoading(false); return }
-          }
+        for (const g of gs) {
+          const mine = g.members.find((m) => m.userId === me.id)
+          if (mine) { setEntryGroupId(g.id); await enterAs(g, mine); setLoading(false); return }
         }
 
         // 2) Otherwise restore the last group + member used on this device.
@@ -117,7 +126,42 @@ export default function Page() {
           const m = g?.members.find((x) => x.id === last.memberId)
           if (g && m) { setEntryGroupId(g.id); await enterAs(g, m) }
         }
+        setLoading(false)
+        return
       }
+
+      // Guest mode — everything lives in localStorage; jump straight in.
+      if (isGuestMode()) {
+        const gs = guestSeedIfEmpty()
+        setGroups(gs)
+        const last = loadLastContext()
+        const g = gs.find((x) => x.id === last?.groupId) ?? gs[0]
+        const m = g?.members.find((x) => x.id === last?.memberId) ?? g?.members[0]
+        if (g && m) { setEntryGroupId(g.id); await enterAs(g, m) }
+        setLoading(false)
+        return
+      }
+
+      // Room mode — load the single cloud group behind the entered Room Code.
+      const code = getRoomCode()
+      if (code) {
+        const g = await fetchGroupByRoomCode(code)
+        if (g) {
+          setGroups([g])
+          setEntryGroupId(g.id)
+          const last = loadLastContext()
+          const m = last?.groupId === g.id ? g.members.find((x) => x.id === last.memberId) : undefined
+          if (m) await enterAs(g, m)
+        } else {
+          // Code no longer valid → drop it and fall back to the login page.
+          exitLocalModes()
+          window.location.href = "/login"
+          return
+        }
+        setLoading(false)
+        return
+      }
+
       setLoading(false)
     }
     boot()
@@ -205,6 +249,17 @@ export default function Page() {
     slipFile?: File,
   ) {
     if (!group || !member) return
+
+    // Guest mode is capped — nudge to the cloud once the local limit is hit.
+    if (isGuestMode() && guestTransactionCount() >= GUEST_TX_LIMIT) {
+      alert(
+        `โหมดทดลองใช้ได้สูงสุด ${GUEST_TX_LIMIT} รายการ\n` +
+          "เข้าสู่ระบบเพื่อใช้งานแบบไม่จำกัดและซิงก์ข้อมูลขึ้นคลาวด์",
+      )
+      window.location.href = "/login"
+      return
+    }
+
     const newTx: Transaction = {
       ...tx,
       id: crypto.randomUUID(),
@@ -347,6 +402,17 @@ export default function Page() {
     renameGroup(group.id, name)
   }
 
+  /** Settings: mint (or reveal) the active group's shareable Room Code. */
+  async function handleGenerateRoomCode(): Promise<string | null> {
+    if (!group) return null
+    const code = await ensureRoomCode(group.id, group.roomCode)
+    if (code) {
+      setGroups((prev) => prev.map((g) => (g.id === group.id ? { ...g, roomCode: code } : g)))
+      setGroup((prev) => (prev ? { ...prev, roomCode: code } : prev))
+    }
+    return code
+  }
+
   function handleSaveGroupAvatar(avatarUrl: string) {
     if (!group) return
     setGroups((prev) => prev.map((g) => (g.id === group.id ? { ...g, avatar: avatarUrl } : g)))
@@ -374,6 +440,7 @@ export default function Page() {
   /** Sign out → clear cached context and go to the login page. */
   async function handleLogout() {
     clearLastContext()
+    exitLocalModes()
     await signOut()
     // Hard navigation: ends the session and lands the user on /login.
     window.location.href = "/login"
@@ -511,6 +578,8 @@ export default function Page() {
             onRemoveMember={handleRemoveMember}
             onRenameGroup={handleRenameGroup}
             onSaveGroupAvatar={handleSaveGroupAvatar}
+            onGenerateRoomCode={handleGenerateRoomCode}
+            roomCodeEnabled={!isGuestMode() && !!authUserId}
           />
         )}
       </div>
