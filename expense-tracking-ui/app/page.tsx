@@ -8,24 +8,29 @@ import { RecentList } from "@/components/expense/recent-list"
 import { SummaryView } from "@/components/expense/summary-view"
 import { HistoryView } from "@/components/expense/history-view"
 import { BottomNav } from "@/components/expense/bottom-nav"
-import { ProfilePicker } from "@/components/expense/profile-picker"
+import { EntryScreen } from "@/components/expense/entry-screen"
 import { SettlementModal } from "@/components/expense/settlement-modal"
 import { SettingsPanel } from "@/components/expense/settings-panel"
 import { PinEntry } from "@/components/expense/pin-entry"
-import { USERS, partnerOf, type User } from "@/components/expense/users"
+import { memberDefaults } from "@/components/expense/users"
+import type { Group, Member, Transaction } from "@/components/expense/types"
 import { getTheme } from "@/components/expense/themes"
 import {
   categories as baseCategories,
   makeCustomCategory,
   formatBaht,
   type Category,
-  type Transaction,
 } from "@/components/expense/categories"
 import type { AppNotification } from "@/components/expense/notifications"
-import { isSupabaseConfigured } from "@/lib/supabase"
+import { isSupabaseConfigured, tryGetSupabase } from "@/lib/supabase"
 import {
-  fetchProfile,
-  upsertProfile,
+  fetchGroups,
+  createGroup,
+  renameGroup,
+  addMember,
+  updateMember,
+  removeMember,
+  fetchMemberPinHash,
   fetchTransactions,
   insertTransaction,
   updateTransaction,
@@ -33,8 +38,13 @@ import {
   settleAllTransactions,
   fetchCustomCategories,
   insertCustomCategory,
+  fetchNotifications,
+  insertNotifications,
+  markNotificationsRead,
+  mapNotificationRow,
 } from "@/lib/db"
 import { uploadSlip } from "@/lib/storage"
+import { memberBalances, myNet } from "@/lib/balances"
 import { verifyPin } from "@/lib/pin"
 
 const tabTitles: Record<string, string> = {
@@ -43,7 +53,9 @@ const tabTitles: Record<string, string> = {
 }
 
 export default function Page() {
-  const [user, setUser] = useState<User | null>(null)
+  const [groups, setGroups] = useState<Group[]>([])
+  const [group, setGroup] = useState<Group | null>(null)
+  const [member, setMember] = useState<Member | null>(null)
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [customCategories, setCustomCategories] = useState<Category[]>([])
   const [tab, setTab] = useState("home")
@@ -51,34 +63,14 @@ export default function Page() {
   const [showSettlement, setShowSettlement] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [pending, setPending] = useState<{ member: Member; hash: string } | null>(null)
 
-  // per-user hashed PINs + display overrides (populated from Supabase on mount)
-  const [userPinHashes, setUserPinHashes] = useState<Record<string, string>>({})
-  const [userOverrides, setUserOverrides] = useState<Record<string, Partial<User>>>({})
-  const [pendingUser, setPendingUser] = useState<User | null>(null)
-
-  // ── Bootstrap: load all data from Supabase ──────────────
+  // ── Bootstrap: load groups + categories ─────────────────
   useEffect(() => {
     async function boot() {
       if (isSupabaseConfigured) {
-        const [profileResults, txs, cats] = await Promise.all([
-          Promise.all(USERS.map((u) => fetchProfile(u.id))),
-          fetchTransactions(),
-          fetchCustomCategories(),
-        ])
-
-        const overrides: Record<string, Partial<User>> = {}
-        const hashes: Record<string, string> = {}
-        profileResults.forEach((p, i) => {
-          if (!p) return
-          const uid = USERS[i].id
-          const { pinHash, ...rest } = p
-          if (Object.keys(rest).length > 0) overrides[uid] = rest
-          if (pinHash) hashes[uid] = pinHash
-        })
-        setUserOverrides(overrides)
-        setUserPinHashes(hashes)
-        setTransactions(txs)
+        const [gs, cats] = await Promise.all([fetchGroups(), fetchCustomCategories()])
+        setGroups(gs)
         setCustomCategories(cats)
       }
       setLoading(false)
@@ -86,66 +78,90 @@ export default function Page() {
     boot()
   }, [])
 
+  // ── Load the active group's transactions ────────────────
+  useEffect(() => {
+    if (!group) { setTransactions([]); return }
+    let active = true
+    fetchTransactions(group.id).then((txs) => { if (active) setTransactions(txs) })
+    return () => { active = false }
+  }, [group?.id])
+
+  // ── Notifications: load inbox + live-subscribe ──────────
+  useEffect(() => {
+    if (!member || !isSupabaseConfigured) return
+    let active = true
+
+    fetchNotifications(member.id).then((rows) => { if (active) setNotifications(rows) })
+
+    const db = tryGetSupabase()
+    if (!db) return
+    const channel = db
+      .channel(`notif-${member.id}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "notifications", filter: `recipient_id=eq.${member.id}` },
+        (payload) => {
+          const notif = mapNotificationRow(payload.new)
+          setNotifications((prev) => (prev.some((p) => p.id === notif.id) ? prev : [notif, ...prev]))
+        },
+      )
+      .subscribe()
+
+    return () => { active = false; db.removeChannel(channel) }
+  }, [member?.id])
+
   const allCategories = useMemo(
     () => [...baseCategories, ...customCategories],
     [customCategories],
   )
 
-  const net = useMemo(
-    () => transactions.reduce((sum, t) => sum + t.owed, 0),
-    [transactions],
+  const balances = useMemo(
+    () => memberBalances(group?.members ?? [], transactions),
+    [group?.members, transactions],
   )
+  const net = member ? myNet(member.id, balances) : 0
 
-  function addNotification(n: Omit<AppNotification, "id" | "ts" | "read">) {
-    setNotifications((prev) => [
-      { ...n, id: crypto.randomUUID(), ts: Date.now(), read: false },
-      ...prev,
-    ])
+  // ── Notification fan-out to every other group member ────
+  function notifyOthers(message: string, type: AppNotification["type"], txId?: string) {
+    if (!group || !member) return
+    const others = group.members.filter((m) => m.id !== member.id)
+    if (others.length === 0) return
+    const list: AppNotification[] = others.map((m) => ({
+      id: crypto.randomUUID(),
+      groupId: group.id,
+      recipientId: m.id,
+      fromName: member.name,
+      message,
+      txId,
+      type,
+      ts: Date.now(),
+      read: false,
+    }))
+    insertNotifications(list)
   }
 
   // ── Transaction handlers ─────────────────────────────────
-
   async function handleAdd(
-    tx: Omit<Transaction, "id" | "createdAt" | "owed" | "payerId">,
+    tx: Omit<Transaction, "id" | "createdAt" | "payerId" | "groupId">,
     slipFile?: File,
   ) {
-    const partner = partnerOf(user!.id)
-    const owed =
-      tx.split === "split"
-        ? tx.amount / 2
-        : tx.split === "request"
-        ? tx.amount
-        : tx.customAmounts
-        ? (tx.customAmounts[partner.id] ?? 0)
-        : 0
-
+    if (!group || !member) return
     const newTx: Transaction = {
       ...tx,
       id: crypto.randomUUID(),
+      groupId: group.id,
+      payerId: member.id,
       createdAt: Date.now(),
-      payerId: user!.id,
-      owed,
     }
 
-    // Upload slip to Supabase Storage if provided
     if (slipFile && isSupabaseConfigured) {
       const path = await uploadSlip(newTx.id, slipFile)
-      if (path) {
-        newTx.slipUrl = path  // store storage path
-        newTx.hasSlip = true
-      }
+      if (path) { newTx.slipUrl = path; newTx.hasSlip = true }
     }
 
     setTransactions((prev) => [newTx, ...prev])
-    insertTransaction(newTx) // persist (fire-and-forget)
-
-    addNotification({
-      recipientId: partner.id,
-      fromName: user!.name,
-      message: `${user!.name} เพิ่มรายการ "${newTx.detail}" ฿${formatBaht(newTx.amount)}`,
-      txId: newTx.id,
-      type: "add",
-    })
+    insertTransaction(newTx)
+    notifyOthers(`${member.name} เพิ่มรายการ "${newTx.detail}" ฿${formatBaht(newTx.amount)}`, "add", newTx.id)
   }
 
   function handleEdit(updated: Transaction) {
@@ -166,51 +182,91 @@ export default function Page() {
   }
 
   function handleConfirmSettle() {
-    const partner = partnerOf(user!.id)
-    setTransactions((prev) => prev.map((t) => ({ ...t, owed: 0, settled: true })))
+    if (!group || !member) return
+    setTransactions((prev) => prev.map((t) => ({ ...t, settled: true })))
     setShowSettlement(false)
-    settleAllTransactions() // persist
-    addNotification({
-      recipientId: partner.id,
-      fromName: user!.name,
-      message: `${user!.name} เคลียร์ยอดทั้งหมดแล้ว`,
-      type: "edit",
-    })
+    settleAllTransactions(group.id)
+    notifyOthers(`${member.name} เคลียร์ยอดทั้งหมดแล้ว`, "edit")
   }
 
-  // ── Profile handlers ────────────────────────────────────
-
-  function handleSettingsSave(updated: Partial<User>, pinHash?: string) {
-    const uid = user!.id
-    setUser((prev) => prev ? { ...prev, ...updated } : prev)
-    setUserOverrides((prev) => ({
-      ...prev,
-      [uid]: { ...(prev[uid] ?? {}), ...updated },
-    }))
-    if (pinHash) {
-      setUserPinHashes((prev) => ({ ...prev, [uid]: pinHash }))
-    }
-    upsertProfile(uid, updated, pinHash)
+  // ── Group / member entry ─────────────────────────────────
+  async function handleCreateGroup(name: string): Promise<Group | null> {
+    const id = await createGroup(name)
+    if (!id) return null
+    const g: Group = { id, name, members: [] }
+    setGroups((prev) => [...prev, g])
+    return g
   }
 
-  function mergeOverrides(base: User): User {
-    return { ...base, ...(userOverrides[base.id] ?? {}) }
+  async function handleAddMember(
+    groupId: string,
+    draft: { name: string; avatar?: string },
+  ): Promise<Member | null> {
+    const g = groups.find((x) => x.id === groupId)
+    const defaults = memberDefaults(g?.members.length ?? 0)
+    const m = await addMember(groupId, { name: draft.name, avatar: draft.avatar, ...defaults })
+    if (!m) return null
+    setGroups((prev) => prev.map((x) => (x.id === groupId ? { ...x, members: [...x.members, m] } : x)))
+    return m
   }
 
-  function handleProfileSelect(u: User) {
-    const merged = mergeOverrides(u)
-    if (userPinHashes[u.id]) {
-      setPendingUser(merged)
+  async function enterAs(g: Group, m: Member) {
+    const hash = await fetchMemberPinHash(m.id)
+    if (hash) {
+      setGroup(g)
+      setPending({ member: m, hash })
     } else {
-      setUser(merged)
+      setGroup(g)
+      setMember(m)
       setTab("home")
     }
   }
 
-  function handleMarkAllRead() {
-    setNotifications((prev) =>
-      prev.map((n) => (n.recipientId === user?.id ? { ...n, read: true } : n)),
+  // ── Profile / settings handlers ──────────────────────────
+  function applyMemberUpdate(memberId: string, updated: Partial<Member>) {
+    setGroups((prev) =>
+      prev.map((g) => ({
+        ...g,
+        members: g.members.map((m) => (m.id === memberId ? { ...m, ...updated } : m)),
+      })),
     )
+    setGroup((prev) =>
+      prev ? { ...prev, members: prev.members.map((m) => (m.id === memberId ? { ...m, ...updated } : m)) } : prev,
+    )
+  }
+
+  function handleSettingsSave(updated: Partial<Member>, pinHash?: string) {
+    if (!member) return
+    setMember((prev) => (prev ? { ...prev, ...updated } : prev))
+    applyMemberUpdate(member.id, updated)
+    updateMember(member.id, updated, pinHash)
+  }
+
+  async function handleAddGroupMember(name: string) {
+    if (!group) return
+    await handleAddMember(group.id, { name })
+  }
+
+  function handleRemoveMember(memberId: string) {
+    if (!group) return
+    setGroups((prev) =>
+      prev.map((g) => (g.id === group.id ? { ...g, members: g.members.filter((m) => m.id !== memberId) } : g)),
+    )
+    setGroup((prev) => (prev ? { ...prev, members: prev.members.filter((m) => m.id !== memberId) } : prev))
+    removeMember(memberId)
+  }
+
+  function handleRenameGroup(name: string) {
+    if (!group) return
+    setGroups((prev) => prev.map((g) => (g.id === group.id ? { ...g, name } : g)))
+    setGroup((prev) => (prev ? { ...prev, name } : prev))
+    renameGroup(group.id, name)
+  }
+
+  function handleMarkAllRead() {
+    if (!member) return
+    setNotifications((prev) => prev.map((n) => (n.recipientId === member.id ? { ...n, read: true } : n)))
+    markNotificationsRead(member.id)
   }
 
   // ── Loading screen ──────────────────────────────────────
@@ -226,30 +282,31 @@ export default function Page() {
   }
 
   // ── PIN gate ────────────────────────────────────────────
-  if (pendingUser) {
+  if (pending) {
     return (
       <PinEntry
-        user={pendingUser}
-        checkPin={async (pin) => {
-          const stored = userPinHashes[pendingUser.id]
-          if (!stored) return false
-          return verifyPin(pin, stored, pendingUser.id)
-        }}
-        onSuccess={() => { setUser(pendingUser); setPendingUser(null); setTab("home") }}
-        onCancel={() => setPendingUser(null)}
+        member={pending.member}
+        checkPin={async (pin) => verifyPin(pin, pending.hash, pending.member.pinSalt ?? pending.member.id)}
+        onSuccess={() => { setMember(pending.member); setPending(null); setTab("home") }}
+        onCancel={() => { setPending(null); setGroup(null) }}
       />
     )
   }
 
-  // ── Profile picker ──────────────────────────────────────
-  const mergedUsers = USERS.map(mergeOverrides)
-
-  if (!user) {
-    return <ProfilePicker users={mergedUsers} onSelect={handleProfileSelect} />
+  // ── Entry: pick group + member ──────────────────────────
+  if (!member || !group) {
+    return (
+      <EntryScreen
+        groups={groups}
+        onEnter={enterAs}
+        onCreateGroup={handleCreateGroup}
+        onAddMember={handleAddMember}
+      />
+    )
   }
 
   // ── Main app ────────────────────────────────────────────
-  const theme = getTheme(user.themeId)
+  const theme = getTheme(member.themeId)
   const themeStyle: React.CSSProperties = {
     "--background": theme.vars.background,
     "--primary": theme.vars.primary,
@@ -258,8 +315,7 @@ export default function Page() {
     "--chart-1": theme.vars["chart-1"],
   } as React.CSSProperties
 
-  const partner = partnerOf(user.id)
-  const myNotifications = notifications.filter((n) => n.recipientId === user.id)
+  const myNotifications = notifications.filter((n) => n.recipientId === member.id)
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-background" style={themeStyle}>
@@ -267,28 +323,33 @@ export default function Page() {
         {tab === "home" && (
           <>
             <AppHeader
-              user={user}
+              group={group}
+              member={member}
               notifications={myNotifications}
-              onSwitch={() => setUser(null)}
+              onSwitchMember={() => { setMember(null); setTab("home") }}
+              onSwitchGroup={() => { setMember(null); setGroup(null); setTab("home") }}
               onMarkAllRead={handleMarkAllRead}
               onOpenSettings={() => setShowSettings(true)}
             />
             <div className="space-y-5 pt-2">
               <BalanceCard
                 net={net}
-                partnerName={partner.name}
+                members={group.members}
+                currentMemberId={member.id}
                 onRequestSettle={() => setShowSettlement(true)}
               />
               <AddTransaction
                 categories={allCategories}
-                user={user}
-                partner={partner}
+                members={group.members}
+                currentMember={member}
                 onAdd={handleAdd}
                 onAddCategory={handleAddCategory}
               />
               <RecentList
                 items={transactions}
                 categories={allCategories}
+                members={group.members}
+                currentMemberId={member.id}
                 onSeeAll={() => setTab("history")}
               />
             </div>
@@ -299,29 +360,24 @@ export default function Page() {
           <header className="px-5 pb-1 pt-7">
             <h1 className="text-2xl font-bold text-foreground">{tabTitles[tab]}</h1>
             <p className="text-sm text-muted-foreground">
-              {user.name} · กับ {partner.name}
+              {group.name} · {group.members.length} คน
             </p>
           </header>
         )}
 
         {tab === "summary" && (
-          <SummaryView
-            transactions={transactions}
-            categories={allCategories}
-            user={user}
-            partner={partner}
-          />
+          <SummaryView transactions={transactions} categories={allCategories} members={group.members} />
         )}
 
         {tab === "history" && (
           <HistoryView
             transactions={transactions}
             categories={allCategories}
-            user={user}
-            partner={partner}
+            members={group.members}
+            currentMember={member}
             onEdit={handleEdit}
             onDelete={handleDelete}
-            onNotify={addNotification}
+            onNotify={notifyOthers}
           />
         )}
       </div>
@@ -330,9 +386,12 @@ export default function Page() {
 
       {showSettings && (
         <SettingsPanel
-          user={user}
+          group={group}
+          member={member}
           onSave={handleSettingsSave}
-          hasPin={!!userPinHashes[user.id]}
+          onAddMember={handleAddGroupMember}
+          onRemoveMember={handleRemoveMember}
+          onRenameGroup={handleRenameGroup}
           onClose={() => setShowSettings(false)}
         />
       )}
@@ -341,9 +400,9 @@ export default function Page() {
         <SettlementModal
           transactions={transactions}
           categories={allCategories}
-          user={user}
-          partner={partner}
-          net={net}
+          members={group.members}
+          currentMemberId={member.id}
+          balances={balances}
           onConfirm={handleConfirmSettle}
           onClose={() => setShowSettlement(false)}
         />

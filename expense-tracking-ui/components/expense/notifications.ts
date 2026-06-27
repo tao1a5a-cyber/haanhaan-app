@@ -1,5 +1,8 @@
 export type AppNotification = {
   id: string
+  /** group this notification belongs to */
+  groupId?: string
+  /** member id who should see it */
   recipientId: string
   fromName: string
   message: string

@@ -11,7 +11,8 @@ import {
   type SplitMode,
 } from "./categories"
 import { CategoryGlyph } from "./category-glyph"
-import type { User } from "./users"
+import { splitEqually } from "@/lib/balances"
+import type { Member } from "./types"
 import type { AppNotification } from "./notifications"
 
 function dateKey(ts: number) {
@@ -39,19 +40,19 @@ type EditState = {
 export function HistoryView({
   transactions,
   categories,
-  user,
-  partner,
+  members,
+  currentMember,
   onEdit,
   onDelete,
   onNotify,
 }: {
   transactions: Transaction[]
   categories: Category[]
-  user: User
-  partner: User
+  members: Member[]
+  currentMember: Member
   onEdit: (tx: Transaction) => void
   onDelete: (txId: string) => void
-  onNotify: (n: Omit<AppNotification, "id" | "ts" | "read">) => void
+  onNotify: (message: string, type: AppNotification["type"], txId?: string) => void
 }) {
   const [query, setQuery] = useState("")
   const [who, setWho] = useState<"all" | string>("all")
@@ -61,11 +62,8 @@ export function HistoryView({
   const [viewingSlip, setViewingSlip] = useState<string | null>(null)
   const editSlipInputRef = useRef<HTMLInputElement>(null)
 
-  const whoChips = [
-    { id: "all", label: "ทุกคน" },
-    { id: user.id, label: user.name },
-    { id: partner.id, label: partner.name },
-  ]
+  const nameOf = (id: string) => members.find((m) => m.id === id)?.name ?? "—"
+  const whoChips = [{ id: "all", label: "ทุกคน" }, ...members.map((m) => ({ id: m.id, label: m.name }))]
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -117,18 +115,30 @@ export function HistoryView({
     e.target.value = ""
   }
 
+  /** Recompute the shares map for the edited amount/split, keeping the same participants. */
+  function recomputeShares(tx: Transaction, amount: number, split: SplitMode): Record<string, number> {
+    let ids = Object.keys(tx.shares ?? {})
+    if (ids.length === 0) ids = members.map((m) => m.id)
+    if (split === "request") {
+      const bens = ids.filter((id) => id !== tx.payerId)
+      return splitEqually(amount, bens.length ? bens : ids)
+    }
+    if (split === "custom") {
+      const old = tx.amount || 0
+      if (old <= 0) return splitEqually(amount, ids)
+      // scale existing proportions to the new amount
+      const factor = amount / old
+      const rec: Record<string, number> = {}
+      for (const id of ids) rec[id] = Math.round((tx.shares[id] ?? 0) * factor * 100) / 100
+      return rec
+    }
+    return splitEqually(amount, ids)
+  }
+
   function commitEdit() {
     if (!editing) return
     const amountNum = Number(editing.amount) || 0
     if (amountNum <= 0) return
-    const owed =
-      editing.split === "split"
-        ? amountNum / 2
-        : editing.split === "request"
-        ? amountNum
-        : editing.tx.customAmounts
-        ? (editing.tx.customAmounts[partner.id] ?? 0)
-        : 0
     const updated: Transaction = {
       ...editing.tx,
       amount: amountNum,
@@ -137,28 +147,16 @@ export function HistoryView({
       split: editing.split,
       hasSlip: !!editing.slipUrl,
       slipUrl: editing.slipUrl,
-      owed,
+      shares: recomputeShares(editing.tx, amountNum, editing.split),
     }
     onEdit(updated)
-    onNotify({
-      recipientId: partner.id,
-      fromName: user.name,
-      message: `${user.name} แก้ไขรายการ "${updated.detail}" ฿${formatBaht(updated.amount)}`,
-      txId: updated.id,
-      type: "edit",
-    })
+    onNotify(`${currentMember.name} แก้ไขรายการ "${updated.detail}" ฿${formatBaht(updated.amount)}`, "edit", updated.id)
     setEditing(null)
   }
 
   function handleDelete(txId: string, detail: string) {
     onDelete(txId)
-    onNotify({
-      recipientId: partner.id,
-      fromName: user.name,
-      message: `${user.name} ลบรายการ "${detail}"`,
-      txId,
-      type: "delete",
-    })
+    onNotify(`${currentMember.name} ลบรายการ "${detail}"`, "delete", txId)
     setConfirmDelete(null)
   }
 
@@ -253,7 +251,6 @@ export function HistoryView({
                   {items.map((t) => {
                     const cat = getCategory(t.categoryId, categories)
                     const mode = splitModes.find((m) => m.id === t.split)
-                    const payer = t.payerId === user.id ? user : partner
                     return (
                       <li
                         key={t.id}
@@ -266,7 +263,7 @@ export function HistoryView({
                           <div className="min-w-0 flex-1">
                             <p className="truncate text-sm font-semibold text-foreground">{t.detail}</p>
                             <p className="text-xs text-muted-foreground">
-                              {payer.name} · {mode?.label} · {timeOf(t.createdAt)}
+                              {nameOf(t.payerId)} · {mode?.label} · {timeOf(t.createdAt)}
                               {t.settled ? " · เคลียร์แล้ว" : ""}
                             </p>
                           </div>

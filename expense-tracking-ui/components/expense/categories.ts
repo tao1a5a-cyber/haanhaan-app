@@ -67,28 +67,13 @@ export function makeCustomCategory(label: string, emoji: string, index: number):
 }
 
 export const splitModes: { id: SplitMode; label: string; hint: string }[] = [
-  { id: "split", label: "หาร 50/50", hint: "แบ่งคนละครึ่ง" },
+  { id: "split", label: "หารเท่ากัน", hint: "แบ่งเท่ากันทุกคน" },
   { id: "custom", label: "กำหนดเอง", hint: "ระบุสัดส่วนเอง" },
-  { id: "request", label: "ฝากซื้อ", hint: "อีกฝ่ายจ่ายคืนเต็ม" },
+  { id: "request", label: "ฝากจ่าย", hint: "คนอื่นจ่ายคืนเต็ม" },
 ]
 
-export type Transaction = {
-  id: string
-  amount: number
-  detail: string
-  categoryId: string
-  split: SplitMode
-  createdAt: number
-  /** id of the user who paid */
-  payerId: string
-  /** positive = อีกฝ่ายเป็นหนี้เรา, negative = เราเป็นหนี้อีกฝ่าย */
-  owed: number
-  settled?: boolean
-  hasSlip?: boolean
-  slipUrl?: string
-  /** for custom split: userId → amount they pay */
-  customAmounts?: Record<string, number>
-}
+// Transaction now lives in ./types (multi-member shares model).
+export type { Transaction } from "./types"
 
 export function getCategory(id: string, list: Category[] = categories): Category {
   return (

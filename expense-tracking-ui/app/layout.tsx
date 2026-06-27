@@ -15,21 +15,10 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: 'หารหาร — แชร์ค่าใช้จ่ายง่ายๆ',
   description: 'หารหาร แอปจัดการค่าใช้จ่ายร่วมกัน บันทึก หาร เคลียร์ยอด ง่ายสุดๆ',
-  generator: 'v0.app',
   icons: {
     icon: [
-      {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
-        media: '(prefers-color-scheme: dark)',
-      },
-      {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
-      },
+      { url: '/icon-light-32x32.png', media: '(prefers-color-scheme: light)' },
+      { url: '/icon-dark-32x32.png', media: '(prefers-color-scheme: dark)' },
     ],
     apple: '/apple-icon.png',
   },
