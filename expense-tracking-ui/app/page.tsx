@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { X } from "lucide-react"
 import { AppHeader } from "@/components/expense/app-header"
 import { BalanceCard } from "@/components/expense/balance-card"
 import { AddTransaction } from "@/components/expense/add-transaction"
@@ -25,11 +26,15 @@ import type { AppNotification } from "@/components/expense/notifications"
 import { isSupabaseConfigured, tryGetSupabase } from "@/lib/supabase"
 import {
   fetchGroups,
+  ensureRoomCode,
   createGroup,
   renameGroup,
+  updateGroupAvatar,
   addMember,
   updateMember,
   removeMember,
+  claimMember,
+  releaseMember,
   fetchMemberPinHash,
   fetchTransactions,
   insertTransaction,
@@ -43,13 +48,18 @@ import {
   markNotificationsRead,
   mapNotificationRow,
 } from "@/lib/db"
-import { uploadSlip } from "@/lib/storage"
+import { uploadSlip, getSlipUrl } from "@/lib/storage"
 import { memberBalances, myNet } from "@/lib/balances"
 import { verifyPin } from "@/lib/pin"
+import { signOut, getCurrentUser, onAuthChange } from "@/lib/auth"
+import { loadLastContext, saveLastContext, clearLastContext } from "@/lib/prefs"
+import { isGuestMode, exitLocalModes, GUEST_TX_LIMIT } from "@/lib/access-mode"
+import { guestSeedIfEmpty, guestTransactionCount } from "@/lib/guest-store"
 
 const tabTitles: Record<string, string> = {
   summary: "สรุปค่าใช้จ่าย",
   history: "ประวัติรายการ",
+  settings: "ตั้งค่า",
 }
 
 export default function Page() {
@@ -61,22 +71,114 @@ export default function Page() {
   const [tab, setTab] = useState("home")
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [showSettlement, setShowSettlement] = useState(false)
-  const [showSettings, setShowSettings] = useState(false)
+  // add-expense form sheet opened by the central FAB
+  const [showAddForm, setShowAddForm] = useState(false)
   const [loading, setLoading] = useState(true)
   const [pending, setPending] = useState<{ member: Member; hash: string } | null>(null)
+  // when re-entering, jump straight to the member picker for this group
+  const [entryGroupId, setEntryGroupId] = useState<string | null>(null)
+  // signed-in Supabase account (shared cookie session)
+  const [authEmail, setAuthEmail] = useState<string | null>(null)
+  const [authUserId, setAuthUserId] = useState<string | null>(null)
 
-  // ── Bootstrap: load groups + categories ─────────────────
+  // ── Auth gate: send unauthenticated visitors to /login ─────
+  // Also drives the header's signed-in email indicator + identity binding.
+  useEffect(() => {
+    if (!isSupabaseConfigured) return
+    // Offline Guest Mode is intentionally not signed in — don't bounce to /login.
+    if (isGuestMode()) return
+    // Anonymous (Room Code) sessions count as signed in, so `u` is truthy for
+    // them and they aren't redirected; only a true sign-out sends to /login.
+    getCurrentUser().then((u) => {
+      setAuthEmail(u?.email || null)
+      setAuthUserId(u?.id ?? null)
+      if (!u) window.location.href = "/login"
+    })
+    return onAuthChange((u) => {
+      setAuthEmail(u?.email || null)
+      setAuthUserId(u?.id ?? null)
+      if (!u) window.location.href = "/login"
+    })
+  }, [])
+
+  // ── Bootstrap: load groups, then pick where to land ─────
   useEffect(() => {
     async function boot() {
-      if (isSupabaseConfigured) {
-        const [gs, cats] = await Promise.all([fetchGroups(), fetchCustomCategories()])
+      const me = isSupabaseConfigured ? await getCurrentUser() : null
+
+      // 1) A real (non-anonymous) account always wins and clears any guest flag.
+      if (me && !me.isAnonymous) {
+        exitLocalModes()
+        setAuthEmail(me.email || null)
+        setAuthUserId(me.id)
+        const gs = await fetchGroups()
         setGroups(gs)
-        setCustomCategories(cats)
+
+        // Email already bound to a member → enter that profile directly.
+        for (const g of gs) {
+          const mine = g.members.find((m) => m.userId === me.id)
+          if (mine) { setEntryGroupId(g.id); await enterAs(g, mine); setLoading(false); return }
+        }
+
+        // Otherwise restore the last group + member used on this device.
+        const last = loadLastContext()
+        if (last) {
+          const g = gs.find((x) => x.id === last.groupId)
+          const m = g?.members.find((x) => x.id === last.memberId)
+          if (g && m) { setEntryGroupId(g.id); await enterAs(g, m) }
+        }
+        setLoading(false)
+        return
       }
+
+      // 2) Offline Guest Mode — everything lives in localStorage.
+      if (isGuestMode()) {
+        const gs = guestSeedIfEmpty()
+        setGroups(gs)
+        const last = loadLastContext()
+        const g = gs.find((x) => x.id === last?.groupId) ?? gs[0]
+        const m = g?.members.find((x) => x.id === last?.memberId) ?? g?.members[0]
+        if (g && m) { setEntryGroupId(g.id); await enterAs(g, m) }
+        setLoading(false)
+        return
+      }
+
+      // 3) Anonymous Room guest — RLS returns only the group(s) they redeemed a
+      //    code for. Let them pick a member; the anonymous session persists.
+      if (me) {
+        setAuthUserId(me.id)
+        const gs = await fetchGroups()
+        setGroups(gs)
+        if (gs.length > 0) setEntryGroupId(gs[0].id)
+        const last = loadLastContext()
+        if (last) {
+          const g = gs.find((x) => x.id === last.groupId)
+          const m = g?.members.find((x) => x.id === last.memberId)
+          if (g && m) { setEntryGroupId(g.id); await enterAs(g, m) }
+        }
+        setLoading(false)
+        return
+      }
+
+      // 4) Not signed in → the auth gate redirects to /login.
       setLoading(false)
     }
     boot()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // ── Custom categories are scoped to the active member ───
+  useEffect(() => {
+    if (!member || !isSupabaseConfigured) { setCustomCategories([]); return }
+    let active = true
+    fetchCustomCategories(member.id).then((cats) => { if (active) setCustomCategories(cats) })
+    return () => { active = false }
+  }, [member?.id])
+
+  // ── Remember the active group + member for next open ────
+  useEffect(() => {
+    if (group && member) saveLastContext({ groupId: group.id, memberId: member.id })
+  }, [group?.id, member?.id])
 
   // ── Load the active group's transactions ────────────────
   useEffect(() => {
@@ -88,7 +190,7 @@ export default function Page() {
 
   // ── Notifications: load inbox + live-subscribe ──────────
   useEffect(() => {
-    if (!member || !isSupabaseConfigured) return
+    if (!member || !isSupabaseConfigured || isGuestMode()) return
     let active = true
 
     fetchNotifications(member.id).then((rows) => { if (active) setNotifications(rows) })
@@ -146,6 +248,17 @@ export default function Page() {
     slipFile?: File,
   ) {
     if (!group || !member) return
+
+    // Guest mode is capped — nudge to the cloud once the local limit is hit.
+    if (isGuestMode() && guestTransactionCount() >= GUEST_TX_LIMIT) {
+      alert(
+        `โหมดทดลองใช้ได้สูงสุด ${GUEST_TX_LIMIT} รายการ\n` +
+          "เข้าสู่ระบบเพื่อใช้งานแบบไม่จำกัดและซิงก์ข้อมูลขึ้นคลาวด์",
+      )
+      window.location.href = "/login"
+      return
+    }
+
     const newTx: Transaction = {
       ...tx,
       id: crypto.randomUUID(),
@@ -156,7 +269,12 @@ export default function Page() {
 
     if (slipFile && isSupabaseConfigured) {
       const path = await uploadSlip(newTx.id, slipFile)
-      if (path) { newTx.slipUrl = path; newTx.hasSlip = true }
+      if (path) {
+        newTx.slipPath = path
+        newTx.hasSlip = true
+        // Resolve a signed URL so the thumbnail renders (path alone isn't fetchable).
+        newTx.slipUrl = (await getSlipUrl(path)) ?? newTx.slipUrl
+      }
     }
 
     setTransactions((prev) => [newTx, ...prev])
@@ -177,7 +295,7 @@ export default function Page() {
   function handleAddCategory(label: string, emoji: string) {
     const cat = makeCustomCategory(label, emoji, customCategories.length)
     setCustomCategories((prev) => [...prev, cat])
-    insertCustomCategory(cat, customCategories.length)
+    insertCustomCategory(cat, customCategories.length, member?.id)
     return cat.id
   }
 
@@ -191,9 +309,10 @@ export default function Page() {
 
   // ── Group / member entry ─────────────────────────────────
   async function handleCreateGroup(name: string): Promise<Group | null> {
-    const id = await createGroup(name)
-    if (!id) return null
-    const g: Group = { id, name, members: [] }
+    // Pass the host so the new group is owned by its creator (also stamped
+    // server-side by the set_group_host trigger under the strict RLS model).
+    const g = await createGroup(name, authUserId ?? undefined)
+    if (!g) return null
     setGroups((prev) => [...prev, g])
     return g
   }
@@ -210,6 +329,25 @@ export default function Page() {
     return m
   }
 
+  /** Remember "this email = this member" so next login enters directly. */
+  function bindMemberToMe(m: Member) {
+    if (!authUserId || m.userId) return // unauthenticated or already bound
+    claimMember(m.id, authUserId)
+    applyMemberUpdate(m.id, { userId: authUserId })
+  }
+
+  /** Settings: assign my email to a chosen member, moving it off any previous one. */
+  function handleClaimMember(memberId: string) {
+    if (!authUserId || !group) return
+    const prev = group.members.find((m) => m.userId === authUserId)
+    if (prev && prev.id !== memberId) {
+      releaseMember(prev.id)
+      applyMemberUpdate(prev.id, { userId: undefined })
+    }
+    claimMember(memberId, authUserId)
+    applyMemberUpdate(memberId, { userId: authUserId })
+  }
+
   async function enterAs(g: Group, m: Member) {
     const hash = await fetchMemberPinHash(m.id)
     if (hash) {
@@ -219,6 +357,7 @@ export default function Page() {
       setGroup(g)
       setMember(m)
       setTab("home")
+      bindMemberToMe(m)
     }
   }
 
@@ -263,6 +402,50 @@ export default function Page() {
     renameGroup(group.id, name)
   }
 
+  /** Settings: mint (or reveal) the active group's shareable Room Code. */
+  async function handleGenerateRoomCode(): Promise<string | null> {
+    if (!group) return null
+    const code = await ensureRoomCode(group.id, group.roomCode)
+    if (code) {
+      setGroups((prev) => prev.map((g) => (g.id === group.id ? { ...g, roomCode: code } : g)))
+      setGroup((prev) => (prev ? { ...prev, roomCode: code } : prev))
+    }
+    return code
+  }
+
+  function handleSaveGroupAvatar(avatarUrl: string) {
+    if (!group) return
+    setGroups((prev) => prev.map((g) => (g.id === group.id ? { ...g, avatar: avatarUrl } : g)))
+    setGroup((prev) => (prev ? { ...prev, avatar: avatarUrl } : prev))
+    updateGroupAvatar(group.id, avatarUrl)
+  }
+
+  // ── Header navigation ────────────────────────────────────
+  /** Switch the active group → reopen the member picker for it. */
+  function handleSelectGroup(g: Group) {
+    setEntryGroupId(g.id)
+    setMember(null)
+    setGroup(null)
+    setTab("home")
+  }
+
+  /** "Back to Home" → the 'who are you?' profile picker for the current group. */
+  function handleBackToHome() {
+    setEntryGroupId(group?.id ?? null)
+    setMember(null)
+    setGroup(null)
+    setTab("home")
+  }
+
+  /** Sign out → clear cached context and go to the login page. */
+  async function handleLogout() {
+    clearLastContext()
+    exitLocalModes()
+    await signOut()
+    // Hard navigation: ends the session and lands the user on /login.
+    window.location.href = "/login"
+  }
+
   function handleMarkAllRead() {
     if (!member) return
     setNotifications((prev) => prev.map((n) => (n.recipientId === member.id ? { ...n, read: true } : n)))
@@ -287,7 +470,7 @@ export default function Page() {
       <PinEntry
         member={pending.member}
         checkPin={async (pin) => verifyPin(pin, pending.hash, pending.member.pinSalt ?? pending.member.id)}
-        onSuccess={() => { setMember(pending.member); setPending(null); setTab("home") }}
+        onSuccess={() => { bindMemberToMe(pending.member); setMember(pending.member); setPending(null); setTab("home") }}
         onCancel={() => { setPending(null); setGroup(null) }}
       />
     )
@@ -298,6 +481,7 @@ export default function Page() {
     return (
       <EntryScreen
         groups={groups}
+        initialGroupId={entryGroupId}
         onEnter={enterAs}
         onCreateGroup={handleCreateGroup}
         onAddMember={handleAddMember}
@@ -324,12 +508,14 @@ export default function Page() {
           <>
             <AppHeader
               group={group}
+              groups={groups}
               member={member}
               notifications={myNotifications}
-              onSwitchMember={() => { setMember(null); setTab("home") }}
-              onSwitchGroup={() => { setMember(null); setGroup(null); setTab("home") }}
+              authEmail={authEmail}
+              onSelectGroup={handleSelectGroup}
+              onBackToHome={handleBackToHome}
+              onLogout={handleLogout}
               onMarkAllRead={handleMarkAllRead}
-              onOpenSettings={() => setShowSettings(true)}
             />
             <div className="space-y-5 pt-2">
               <BalanceCard
@@ -337,13 +523,6 @@ export default function Page() {
                 members={group.members}
                 currentMemberId={member.id}
                 onRequestSettle={() => setShowSettlement(true)}
-              />
-              <AddTransaction
-                categories={allCategories}
-                members={group.members}
-                currentMember={member}
-                onAdd={handleAdd}
-                onAddCategory={handleAddCategory}
               />
               <RecentList
                 items={transactions}
@@ -366,7 +545,12 @@ export default function Page() {
         )}
 
         {tab === "summary" && (
-          <SummaryView transactions={transactions} categories={allCategories} members={group.members} />
+          <SummaryView
+            transactions={transactions}
+            categories={allCategories}
+            members={group.members}
+            currentMember={member}
+          />
         )}
 
         {tab === "history" && (
@@ -380,20 +564,60 @@ export default function Page() {
             onNotify={notifyOthers}
           />
         )}
+
+        {tab === "settings" && (
+          <SettingsPanel
+            embedded
+            group={group}
+            member={member}
+            authEmail={authEmail}
+            authUserId={authUserId}
+            onClaimMember={handleClaimMember}
+            onSave={handleSettingsSave}
+            onAddMember={handleAddGroupMember}
+            onRemoveMember={handleRemoveMember}
+            onRenameGroup={handleRenameGroup}
+            onSaveGroupAvatar={handleSaveGroupAvatar}
+            onGenerateRoomCode={handleGenerateRoomCode}
+            roomCodeEnabled={!isGuestMode() && !!authEmail}
+          />
+        )}
       </div>
 
-      <BottomNav active={tab} onChange={setTab} />
+      <BottomNav active={tab} onChange={setTab} onAdd={() => setShowAddForm(true)} />
 
-      {showSettings && (
-        <SettingsPanel
-          group={group}
-          member={member}
-          onSave={handleSettingsSave}
-          onAddMember={handleAddGroupMember}
-          onRemoveMember={handleRemoveMember}
-          onRenameGroup={handleRenameGroup}
-          onClose={() => setShowSettings(false)}
-        />
+      {/* One-click add: the FAB opens the expense form directly */}
+      {showAddForm && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+          <button
+            type="button"
+            aria-label="ปิด"
+            onClick={() => setShowAddForm(false)}
+            className="absolute inset-0 bg-foreground/30 backdrop-blur-sm"
+          />
+          <div className="relative max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-[2rem] bg-background pb-4 shadow-2xl ring-1 ring-border animate-in slide-in-from-bottom-4 fade-in duration-300 sm:rounded-[2rem]">
+            <div className="sticky top-0 z-10 flex items-center justify-between bg-background/90 px-5 pb-2 pt-4 backdrop-blur-sm">
+              <div className="absolute left-1/2 top-1.5 h-1.5 w-10 -translate-x-1/2 rounded-full bg-border sm:hidden" />
+              <h2 className="text-base font-semibold text-foreground">เพิ่มรายการ</h2>
+              <button
+                type="button"
+                onClick={() => setShowAddForm(false)}
+                aria-label="ปิด"
+                className="grid size-8 place-items-center rounded-full bg-secondary text-muted-foreground transition active:scale-90"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            <AddTransaction
+              categories={allCategories}
+              members={group.members}
+              currentMember={member}
+              onAdd={handleAdd}
+              onAddCategory={handleAddCategory}
+              onSubmitted={() => setShowAddForm(false)}
+            />
+          </div>
+        </div>
       )}
 
       {showSettlement && (

@@ -1,7 +1,7 @@
 "use client"
 
-import { useRef, useMemo, useState } from "react"
-import { Plus, X, ImagePlus, Check } from "lucide-react"
+import { useEffect, useRef, useMemo, useState } from "react"
+import { Plus, X, Camera, Check } from "lucide-react"
 import {
   splitModes,
   formatBaht,
@@ -21,12 +21,44 @@ type Props = {
   currentMember: Member
   onAdd: (tx: Omit<Transaction, "id" | "createdAt" | "payerId" | "groupId">, slipFile?: File) => void
   onAddCategory: (label: string, emoji: string) => string
+  /** called after a transaction is successfully added (e.g. to close a sheet) */
+  onSubmitted?: () => void
 }
 
-export function AddTransaction({ categories, members, currentMember, onAdd, onAddCategory }: Props) {
+/**
+ * Distribute `total` across `ids`, keeping the manually-edited `locked` amounts
+ * fixed and splitting the remaining balance equally among the rest. The rounding
+ * remainder lands on the last unlocked member so the parts always sum to `total`.
+ */
+function autoSplit(
+  total: number,
+  ids: string[],
+  locked: Record<string, number>,
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  const lockedSum = ids.reduce((s, id) => s + (id in locked ? locked[id] : 0), 0)
+  const unlocked = ids.filter((id) => !(id in locked))
+  const remaining = Math.max(total - lockedSum, 0)
+  const per = unlocked.length ? remaining / unlocked.length : 0
+
+  let acc = 0
+  unlocked.forEach((id, i) => {
+    const val = i === unlocked.length - 1
+      ? Math.round((remaining - acc) * 100) / 100
+      : Math.round(per * 100) / 100
+    acc += val
+    out[id] = String(val)
+  })
+  for (const id of ids) if (id in locked) out[id] = String(locked[id])
+  return out
+}
+
+export function AddTransaction({ categories, members, currentMember, onAdd, onAddCategory, onSubmitted }: Props) {
+  const [kind, setKind] = useState<"expense" | "income">("expense")
   const [amount, setAmount] = useState("")
   const [detail, setDetail] = useState("")
   const [categoryId, setCategoryId] = useState("food")
+  const isIncome = kind === "income"
   const [split, setSplit] = useState<SplitMode>("split")
   const [slipUrl, setSlipUrl] = useState<string | null>(null)
   const [slipFile, setSlipFile] = useState<File | null>(null)
@@ -36,6 +68,8 @@ export function AddTransaction({ categories, members, currentMember, onAdd, onAd
   const [selected, setSelected] = useState<string[]>(() => members.map((m) => m.id))
   // custom split: memberId -> string input
   const [custom, setCustom] = useState<Record<string, string>>({})
+  // members whose custom amount was manually edited (kept fixed during auto-split)
+  const [locked, setLocked] = useState<string[]>([])
   const slipInputRef = useRef<HTMLInputElement>(null)
 
   const amountNum = Number(amount) || 0
@@ -53,8 +87,32 @@ export function AddTransaction({ categories, members, currentMember, onAdd, onAd
     [custom, selected],
   )
 
+  // Smart custom split: (re)distribute equally among unlocked members whenever the
+  // total, the participants, or the split mode changes. Manually-edited members stay fixed.
+  useEffect(() => {
+    if (split !== "custom") return
+    const lockedVals: Record<string, number> = {}
+    for (const id of locked) if (selected.includes(id)) lockedVals[id] = Number(custom[id]) || 0
+    setCustom(autoSplit(amountNum, selected, lockedVals))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [split, amountNum, selected])
+
+  /** User typed an amount for one member → lock them and rebalance the rest. */
+  function handleCustomEdit(id: string, raw: string) {
+    const value = raw.replace(/[^0-9.]/g, "")
+    const nextLocked = locked.includes(id) ? locked : [...locked, id]
+    const lockedVals: Record<string, number> = {}
+    for (const lid of nextLocked) {
+      lockedVals[lid] = lid === id ? Number(value) || 0 : Number(custom[lid]) || 0
+    }
+    setLocked(nextLocked)
+    // keep the raw string the user is typing for the edited field
+    setCustom({ ...autoSplit(amountNum, selected, lockedVals), [id]: value })
+  }
+
   function toggleMember(id: string) {
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+    setLocked((prev) => prev.filter((x) => x !== id))
   }
 
   /** Build the shares map (memberId → owed portion) for the chosen split. */
@@ -106,6 +164,7 @@ export function AddTransaction({ categories, members, currentMember, onAdd, onAd
     if (!shares) return
     onAdd(
       {
+        kind,
         amount: amountNum,
         detail: detail.trim() || "ไม่ระบุรายละเอียด",
         categoryId,
@@ -116,6 +175,7 @@ export function AddTransaction({ categories, members, currentMember, onAdd, onAd
       },
       slipFile ?? undefined,
     )
+    setKind("expense")
     setAmount("")
     setDetail("")
     setSlipUrl(null)
@@ -125,6 +185,8 @@ export function AddTransaction({ categories, members, currentMember, onAdd, onAd
     setCategoryId("food")
     setSelected(members.map((m) => m.id))
     setCustom({})
+    setLocked([])
+    onSubmitted?.()
   }
 
   return (
@@ -134,11 +196,39 @@ export function AddTransaction({ categories, members, currentMember, onAdd, onAd
         className="rounded-[1.75rem] bg-card p-5 shadow-[0_10px_30px_-20px_oklch(0.3_0.04_55/0.5)] ring-1 ring-border"
       >
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-foreground">เพิ่มรายการ</h2>
-          <span className="text-xs text-muted-foreground">{currentMember.name} เป็นคนจ่าย</span>
+          <h2 className="text-base font-semibold text-foreground">
+            {isIncome ? "เพิ่มรายรับ" : "เพิ่มรายการ"}
+          </h2>
+          <span className="text-xs text-muted-foreground">
+            {currentMember.name} {isIncome ? "เป็นคนรับ" : "เป็นคนจ่าย"}
+          </span>
         </div>
 
-        {/* Amount */}
+        {/* Expense ↔ Income switch (expense is the default/primary mode) */}
+        <div className="mt-3 grid grid-cols-2 rounded-2xl bg-secondary p-1">
+          {([
+            { id: "expense", label: "รายจ่าย" },
+            { id: "income", label: "รายรับ" },
+          ] as const).map((opt) => (
+            <button
+              type="button"
+              key={opt.id}
+              onClick={() => setKind(opt.id)}
+              className={`rounded-xl py-2 text-sm font-semibold transition ${
+                kind === opt.id
+                  ? "bg-card text-foreground shadow-sm ring-1 ring-border"
+                  : "text-muted-foreground"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Slip / receipt picker (hidden input, triggered by the camera icon) */}
+        <input ref={slipInputRef} type="file" accept="image/*" className="hidden" onChange={handleSlipFile} />
+
+        {/* Amount + inline slip-attach icon */}
         <div className="mt-4 rounded-2xl bg-secondary px-4 py-4">
           <label htmlFor="amount" className="text-xs font-medium text-muted-foreground">จำนวนเงินรวม</label>
           <div className="mt-1 flex items-center gap-2">
@@ -151,14 +241,48 @@ export function AddTransaction({ categories, members, currentMember, onAdd, onAd
               onChange={(e) => setAmount(e.target.value.replace(/[^0-9.]/g, ""))}
               className="w-full bg-transparent text-4xl font-bold tracking-tight text-foreground tabular-nums outline-none placeholder:text-muted-foreground/40"
             />
+            <button
+              type="button"
+              onClick={() => slipInputRef.current?.click()}
+              aria-label="แนบใบเสร็จ / สลิป"
+              className={`grid size-11 shrink-0 place-items-center rounded-xl ring-1 transition active:scale-95 ${
+                slipUrl
+                  ? "overflow-hidden bg-accent/10 ring-accent/40"
+                  : "bg-card text-muted-foreground ring-border"
+              }`}
+            >
+              {slipUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={slipUrl} alt="slip" className="size-full object-cover" />
+              ) : (
+                <Camera className="size-5" />
+              )}
+            </button>
           </div>
         </div>
+
+        {/* Attached slip preview */}
+        {slipUrl && (
+          <div className="mt-3 flex items-center gap-3 rounded-2xl bg-accent/10 px-4 py-3 ring-1 ring-accent/30">
+            <button type="button" onClick={() => window.open(slipUrl, "_blank")} className="size-12 shrink-0 overflow-hidden rounded-xl ring-1 ring-border">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={slipUrl} alt="slip" className="size-full object-cover" />
+            </button>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-medium text-accent">{slipName || "สลิปแนบอยู่"}</p>
+              <button type="button" onClick={() => slipInputRef.current?.click()} className="mt-0.5 text-xs text-muted-foreground underline underline-offset-2">เปลี่ยนรูป</button>
+            </div>
+            <button type="button" onClick={() => { setSlipUrl(null); setSlipFile(null); setSlipName("") }} aria-label="ลบสลิป" className="grid size-7 place-items-center rounded-full bg-secondary text-muted-foreground transition active:scale-90">
+              <X className="size-3.5" />
+            </button>
+          </div>
+        )}
 
         {/* Detail */}
         <input
           value={detail}
           onChange={(e) => setDetail(e.target.value)}
-          placeholder="รายละเอียด เช่น ค่าข้าวเที่ยง"
+          placeholder={isIncome ? "รายละเอียด เช่น ขายของแบ่งกำไร" : "รายละเอียด เช่น ค่าข้าวเที่ยง"}
           className="mt-3 w-full rounded-2xl bg-secondary px-4 py-3.5 text-sm text-foreground outline-none ring-1 ring-transparent transition placeholder:text-muted-foreground focus:bg-card focus:ring-ring"
         />
 
@@ -198,7 +322,7 @@ export function AddTransaction({ categories, members, currentMember, onAdd, onAd
         {members.length > 1 && (
           <>
             <p className="mt-4 mb-2 text-xs font-medium text-muted-foreground">
-              {split === "request" ? "ใครต้องจ่ายคืน" : "ใครร่วมหารบ้าง"}
+              {isIncome ? "ใครได้ส่วนแบ่ง" : split === "request" ? "ใครต้องจ่ายคืน" : "ใครร่วมหารบ้าง"}
             </p>
             <div className="flex flex-wrap gap-2">
               {members.map((m) => {
@@ -234,7 +358,7 @@ export function AddTransaction({ categories, members, currentMember, onAdd, onAd
             <button
               type="button"
               key={m.id}
-              onClick={() => setSplit(m.id)}
+              onClick={() => { if (m.id === "custom") setLocked([]); setSplit(m.id) }}
               className={`relative z-10 rounded-xl py-2 text-sm font-medium transition-colors ${split === m.id ? "text-foreground" : "text-muted-foreground"}`}
             >
               {m.label}
@@ -245,7 +369,9 @@ export function AddTransaction({ categories, members, currentMember, onAdd, onAd
         {/* Custom split inputs */}
         {split === "custom" && (
           <div className="mt-3 space-y-2.5 rounded-2xl bg-secondary p-4">
-            <p className="text-xs font-medium text-muted-foreground">ระบุจำนวนของแต่ละคน</p>
+            <p className="text-xs font-medium text-muted-foreground">
+              ระบุจำนวนของบางคน ระบบจะเฉลี่ยส่วนที่เหลือให้อัตโนมัติ
+            </p>
             {selectedMembers.map((m) => (
               <div key={m.id} className="flex items-center gap-3">
                 <span className="flex w-28 shrink-0 items-center gap-2 text-sm font-medium text-foreground">
@@ -258,8 +384,10 @@ export function AddTransaction({ categories, members, currentMember, onAdd, onAd
                     inputMode="decimal"
                     placeholder="0"
                     value={custom[m.id] ?? ""}
-                    onChange={(e) => setCustom((p) => ({ ...p, [m.id]: e.target.value.replace(/[^0-9.]/g, "") }))}
-                    className="w-full bg-transparent text-sm font-semibold text-foreground tabular-nums outline-none placeholder:text-muted-foreground/40"
+                    onChange={(e) => handleCustomEdit(m.id, e.target.value)}
+                    className={`w-full bg-transparent text-sm font-semibold tabular-nums outline-none placeholder:text-muted-foreground/40 ${
+                      locked.includes(m.id) ? "text-foreground" : "text-muted-foreground"
+                    }`}
                   />
                 </div>
               </div>
@@ -271,29 +399,6 @@ export function AddTransaction({ categories, members, currentMember, onAdd, onAd
           <p className={`mt-2 text-center text-xs font-medium ${canSubmit ? "text-accent" : "text-muted-foreground"}`}>
             {sharePreview}
           </p>
-        )}
-
-        {/* Slip upload */}
-        <input ref={slipInputRef} type="file" accept="image/*" className="hidden" onChange={handleSlipFile} />
-        {slipUrl ? (
-          <div className="mt-4 flex items-center gap-3 rounded-2xl bg-accent/10 px-4 py-3 ring-1 ring-accent/30">
-            <button type="button" onClick={() => window.open(slipUrl, "_blank")} className="size-12 shrink-0 overflow-hidden rounded-xl ring-1 ring-border">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={slipUrl} alt="slip" className="size-full object-cover" />
-            </button>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-accent">{slipName || "สลิป"}</p>
-              <button type="button" onClick={() => slipInputRef.current?.click()} className="mt-0.5 text-xs text-muted-foreground underline underline-offset-2">เปลี่ยนรูป</button>
-            </div>
-            <button type="button" onClick={() => { setSlipUrl(null); setSlipName("") }} aria-label="ลบสลิป" className="grid size-7 place-items-center rounded-full bg-secondary text-muted-foreground transition active:scale-90">
-              <X className="size-3.5" />
-            </button>
-          </div>
-        ) : (
-          <button type="button" onClick={() => slipInputRef.current?.click()} className="mt-4 flex w-full items-center gap-3 rounded-2xl bg-secondary px-4 py-3.5 text-sm font-medium text-muted-foreground ring-1 ring-border transition active:scale-[0.99]">
-            <span className="grid size-7 place-items-center rounded-lg bg-card ring-1 ring-border"><ImagePlus className="size-4" /></span>
-            แนบใบเสร็จ / สลิป
-          </button>
         )}
 
         {/* Submit */}

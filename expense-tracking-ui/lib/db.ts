@@ -1,7 +1,10 @@
 import { tryGetSupabase } from "./supabase"
+import { getSlipUrls } from "./storage"
 import { makeCustomCategory, type Category } from "@/components/expense/categories"
 import type { Group, Member, Transaction } from "@/components/expense/types"
 import type { AppNotification } from "@/components/expense/notifications"
+import { isGuestMode } from "./access-mode"
+import * as guest from "./guest-store"
 
 // ── Groups & Members ──────────────────────────────────────
 
@@ -10,6 +13,7 @@ function mapMember(row: any): Member {
   return {
     id: row.id,
     groupId: row.group_id,
+    userId: row.user_id ?? undefined,
     name: row.name,
     avatar: row.avatar_url ?? "",
     tint: row.tint ?? "oklch(0.93 0.05 70)",
@@ -18,8 +22,21 @@ function mapMember(row: any): Member {
   }
 }
 
+function mapGroup(row: any, members: Member[]): Group {
+  return {
+    id: row.id,
+    name: row.name,
+    members,
+    avatar: row.avatar_url ?? "",
+    hostUserId: row.host_user_id ?? undefined,
+    inviteToken: row.invite_token ?? undefined,
+    roomCode: row.room_code ?? undefined,
+  }
+}
+
 /** Load every group with its members nested. */
 export async function fetchGroups(): Promise<Group[]> {
+  if (isGuestMode()) return guest.guestFetchGroups()
   const db = tryGetSupabase()
   if (!db) return []
 
@@ -38,27 +55,135 @@ export async function fetchGroups(): Promise<Group[]> {
     byGroup.set(m.groupId, list)
   }
 
-  return (groupRows ?? []).map((g: any) => ({
-    id: g.id,
-    name: g.name,
-    members: byGroup.get(g.id) ?? [],
-  }))
+  return (groupRows ?? []).map((g: any) => mapGroup(g, byGroup.get(g.id) ?? []))
 }
 
-/** Create a group and return its id (null offline / on error). */
-export async function createGroup(name: string): Promise<string | null> {
+/** Load only the groups the given auth user is a member of, with members nested. */
+export async function fetchGroupsForUser(userId: string): Promise<Group[]> {
+  const db = tryGetSupabase()
+  if (!db) return []
+
+  const { data: mine, error: meErr } = await db
+    .from("members")
+    .select("group_id")
+    .eq("user_id", userId)
+  if (meErr) { console.error("fetchGroupsForUser", meErr); return [] }
+
+  const groupIds = Array.from(new Set((mine ?? []).map((r: any) => r.group_id)))
+  if (groupIds.length === 0) return []
+
+  const [{ data: groupRows, error: gErr }, { data: memberRows, error: mErr }] = await Promise.all([
+    db.from("groups").select("*").in("id", groupIds).order("created_at", { ascending: true }),
+    db.from("members").select("*").in("group_id", groupIds).order("created_at", { ascending: true }),
+  ])
+  if (gErr) { console.error("fetchGroupsForUser groups", gErr); return [] }
+  if (mErr) { console.error("fetchGroupsForUser members", mErr); return [] }
+
+  const byGroup = new Map<string, Member[]>()
+  for (const row of memberRows ?? []) {
+    const m = mapMember(row)
+    const list = byGroup.get(m.groupId) ?? []
+    list.push(m)
+    byGroup.set(m.groupId, list)
+  }
+  return (groupRows ?? []).map((g: any) => mapGroup(g, byGroup.get(g.id) ?? []))
+}
+
+/** Look up a group by its invite token, with members nested (null if not found). */
+export async function fetchGroupByToken(token: string): Promise<Group | null> {
   const db = tryGetSupabase()
   if (!db) return null
-  const { data, error } = await db.from("groups").insert({ name }).select("id").single()
+  const { data: g, error } = await db.from("groups").select("*").eq("invite_token", token).maybeSingle()
+  if (error) { console.error("fetchGroupByToken", error); return null }
+  if (!g) return null
+  const { data: memberRows, error: mErr } = await db
+    .from("members")
+    .select("*")
+    .eq("group_id", (g as any).id)
+    .order("created_at", { ascending: true })
+  if (mErr) { console.error("fetchGroupByToken members", mErr); return null }
+  return mapGroup(g, (memberRows ?? []).map(mapMember))
+}
+
+// ── Room codes ────────────────────────────────────────────
+// A Room Code is a short, human-typable handle (e.g. "K4P9ZQ") that points at
+// one cloud group. Guests enter it on the login page to browse that group
+// without creating their own account (RLS is permissive for the anon role).
+
+/** Characters used for room codes — omits easily-confused 0/O/1/I. */
+const ROOM_CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+function randomRoomCode(len = 6): string {
+  let out = ""
+  const bytes = crypto.getRandomValues(new Uint8Array(len))
+  for (let i = 0; i < len; i++) out += ROOM_CODE_ALPHABET[bytes[i] % ROOM_CODE_ALPHABET.length]
+  return out
+}
+
+/**
+ * Redeem a Room Code: grants the current (anonymous or real) auth user access
+ * to the matching group via the join_room() SECURITY DEFINER function and
+ * returns the group id. Null = unknown code or no session. This is the only
+ * path that works once the strict RLS in migration 0010 is applied — a direct
+ * `select … where room_code` is blocked before the grant exists.
+ */
+export async function joinRoom(code: string): Promise<string | null> {
+  const db = tryGetSupabase()
+  if (!db) return null
+  const normalized = code.trim().toUpperCase()
+  if (!normalized) return null
+  const { data, error } = await db.rpc("join_room", { p_code: normalized })
+  if (error) { console.error("joinRoom", error); return null }
+  return (data as string | null) ?? null
+}
+
+/**
+ * Return the group's existing Room Code, or mint + persist a fresh unique one.
+ * Retries on the rare unique-index collision. Returns null on hard failure.
+ */
+export async function ensureRoomCode(groupId: string, existing?: string): Promise<string | null> {
+  if (existing) return existing
+  const db = tryGetSupabase()
+  if (!db) return null
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = randomRoomCode()
+    const { error } = await db.from("groups").update({ room_code: code }).eq("id", groupId)
+    if (!error) return code
+    // 23505 = unique_violation → another group grabbed this code, try again.
+    if ((error as any).code !== "23505") { console.error("ensureRoomCode", error); return null }
+  }
+  return null
+}
+
+/** Create a group owned by `hostUserId`; returns the new group (with invite token) or null. */
+export async function createGroup(name: string, hostUserId?: string): Promise<Group | null> {
+  if (isGuestMode()) return guest.guestCreateGroup(name)
+  const db = tryGetSupabase()
+  if (!db) return null
+  const { data, error } = await db
+    .from("groups")
+    .insert({ name, host_user_id: hostUserId ?? null })
+    .select("*")
+    .single()
   if (error) { console.error("createGroup", error); return null }
-  return (data as any)?.id ?? null
+  return mapGroup(data, [])
 }
 
 export async function renameGroup(groupId: string, name: string) {
+  if (isGuestMode()) return guest.guestRenameGroup(groupId, name)
   const db = tryGetSupabase()
   if (!db) return
   const { error } = await db.from("groups").update({ name }).eq("id", groupId)
   if (error) console.error("renameGroup", error)
+}
+
+/** Set (or clear with "") the group's avatar image URL. */
+export async function updateGroupAvatar(groupId: string, avatarUrl: string) {
+  if (isGuestMode()) return guest.guestUpdateGroupAvatar(groupId, avatarUrl)
+  const db = tryGetSupabase()
+  if (!db) return
+  const { error } = await db.from("groups").update({ avatar_url: avatarUrl || null }).eq("id", groupId)
+  if (error) console.error("updateGroupAvatar", error)
 }
 
 /** Insert a member; returns the created member (with db id) or null. */
@@ -66,6 +191,7 @@ export async function addMember(
   groupId: string,
   m: { name: string; avatar?: string; tint: string; themeId?: string },
 ): Promise<Member | null> {
+  if (isGuestMode()) return guest.guestAddMember(groupId, m)
   const db = tryGetSupabase()
   if (!db) return null
   const { data, error } = await db
@@ -88,6 +214,7 @@ export async function updateMember(
   updated: Partial<Member>,
   pinHash?: string,
 ) {
+  if (isGuestMode()) return guest.guestUpdateMember(memberId, updated)
   const db = tryGetSupabase()
   if (!db) return
   const { error } = await db
@@ -103,7 +230,28 @@ export async function updateMember(
   if (error) console.error("updateMember", error)
 }
 
+/**
+ * Bind a member to an auth user (email ↔ identity). After this, logging in
+ * with that email enters this member's profile directly — no picker.
+ * Only call for members that aren't already bound (user_id is null).
+ */
+export async function claimMember(memberId: string, userId: string) {
+  const db = tryGetSupabase()
+  if (!db) return
+  const { error } = await db.from("members").update({ user_id: userId }).eq("id", memberId)
+  if (error) console.error("claimMember", error)
+}
+
+/** Unbind a member from any auth user (clears the email ↔ identity link). */
+export async function releaseMember(memberId: string) {
+  const db = tryGetSupabase()
+  if (!db) return
+  const { error } = await db.from("members").update({ user_id: null }).eq("id", memberId)
+  if (error) console.error("releaseMember", error)
+}
+
 export async function removeMember(memberId: string) {
+  if (isGuestMode()) return guest.guestRemoveMember(memberId)
   const db = tryGetSupabase()
   if (!db) return
   const { error } = await db.from("members").delete().eq("id", memberId)
@@ -112,6 +260,7 @@ export async function removeMember(memberId: string) {
 
 /** Fetch a member's stored PIN hash (null if none). */
 export async function fetchMemberPinHash(memberId: string): Promise<string | null> {
+  if (isGuestMode()) return null
   const db = tryGetSupabase()
   if (!db) return null
   const { data, error } = await db
@@ -126,6 +275,7 @@ export async function fetchMemberPinHash(memberId: string): Promise<string | nul
 // ── Transactions (group-scoped) ───────────────────────────
 
 export async function fetchTransactions(groupId: string): Promise<Transaction[]> {
+  if (isGuestMode()) return guest.guestFetchTransactions(groupId)
   const db = tryGetSupabase()
   if (!db) return []
 
@@ -137,9 +287,17 @@ export async function fetchTransactions(groupId: string): Promise<Transaction[]>
 
   if (error) { console.error("fetchTransactions", error); return [] }
 
-  return (data ?? []).map((row: any) => ({
+  const rows = data ?? []
+
+  // Resolve every private slip path into a short-lived signed URL in one batch,
+  // so <img src> can actually load the thumbnail (raw paths are not fetchable).
+  const slipPaths = rows.map((r: any) => r.slip_path).filter(Boolean) as string[]
+  const signed = await getSlipUrls(slipPaths)
+
+  return rows.map((row: any) => ({
     id: row.id,
     groupId: row.group_id,
+    kind: row.kind === "income" ? "income" : "expense",
     payerId: row.payer_id,
     detail: row.detail,
     amount: Number(row.amount),
@@ -147,7 +305,8 @@ export async function fetchTransactions(groupId: string): Promise<Transaction[]>
     categoryId: row.category_id,
     split: row.split as Transaction["split"],
     settled: row.settled,
-    slipUrl: row.slip_path ?? undefined,
+    slipPath: row.slip_path ?? undefined,
+    slipUrl: row.slip_path ? signed[row.slip_path] ?? undefined : undefined,
     hasSlip: Boolean(row.slip_path),
     createdAt: new Date(row.created_at).getTime(),
   }))
@@ -161,18 +320,20 @@ function normalizeShares(raw: any): Record<string, number> {
 }
 
 export async function insertTransaction(tx: Transaction) {
+  if (isGuestMode()) return guest.guestInsertTransaction(tx)
   const db = tryGetSupabase()
   if (!db) return
   const { error } = await db.from("transactions").insert({
     id: tx.id,
     group_id: tx.groupId,
+    kind: tx.kind ?? "expense",
     payer_id: tx.payerId,
     detail: tx.detail,
     amount: tx.amount,
     shares: tx.shares,
     category_id: tx.categoryId,
     split: tx.split,
-    slip_path: tx.slipUrl ?? null,
+    slip_path: tx.slipPath ?? null,
     settled: tx.settled ?? false,
     created_at: new Date(tx.createdAt).toISOString(),
   })
@@ -180,16 +341,19 @@ export async function insertTransaction(tx: Transaction) {
 }
 
 export async function updateTransaction(tx: Transaction) {
+  if (isGuestMode()) return guest.guestUpdateTransaction(tx)
   const db = tryGetSupabase()
   if (!db) return
   const { error } = await db
     .from("transactions")
     .update({
+      kind: tx.kind ?? "expense",
       detail: tx.detail,
       amount: tx.amount,
       shares: tx.shares,
       category_id: tx.categoryId,
       split: tx.split,
+      slip_path: tx.slipPath ?? null,
       settled: tx.settled ?? false,
     })
     .eq("id", tx.id)
@@ -197,6 +361,7 @@ export async function updateTransaction(tx: Transaction) {
 }
 
 export async function deleteTransaction(txId: string) {
+  if (isGuestMode()) return guest.guestDeleteTransaction(txId)
   const db = tryGetSupabase()
   if (!db) return
   const { error } = await db.from("transactions").delete().eq("id", txId)
@@ -204,6 +369,7 @@ export async function deleteTransaction(txId: string) {
 }
 
 export async function settleAllTransactions(groupId: string) {
+  if (isGuestMode()) return guest.guestSettleAll(groupId)
   const db = tryGetSupabase()
   if (!db) return
   const { error } = await db
@@ -216,9 +382,27 @@ export async function settleAllTransactions(groupId: string) {
 
 // ── Custom categories (global) ────────────────────────────
 
-export async function fetchCustomCategories(): Promise<Category[]> {
+/**
+ * Custom categories scoped to one member. Legacy rows with a null member_id
+ * stay visible to everyone as a shared fallback.
+ */
+export async function fetchCustomCategories(memberId?: string): Promise<Category[]> {
+  if (isGuestMode()) return []
   const db = tryGetSupabase()
   if (!db) return []
+
+  if (memberId) {
+    // Scoped query — owner's rows plus legacy global (null) rows.
+    const { data, error } = await db
+      .from("custom_categories")
+      .select("*")
+      .or(`member_id.eq.${memberId},member_id.is.null`)
+      .order("sort_order", { ascending: true })
+    if (!error) return (data ?? []).map((row: any, i: number) => makeCustomCategory(row.label, row.emoji, i))
+    // Falls through to the unscoped query when the member_id column is absent
+    // (i.e. migration 0003 hasn't been applied yet).
+  }
+
   const { data, error } = await db
     .from("custom_categories")
     .select("*")
@@ -227,16 +411,18 @@ export async function fetchCustomCategories(): Promise<Category[]> {
   return (data ?? []).map((row: any, i: number) => makeCustomCategory(row.label, row.emoji, i))
 }
 
-export async function insertCustomCategory(cat: Category, sortOrder: number) {
+export async function insertCustomCategory(cat: Category, sortOrder: number, memberId?: string) {
+  if (isGuestMode()) return
   const db = tryGetSupabase()
   if (!db) return
-  const { error } = await db.from("custom_categories").insert({
-    id: cat.id,
-    label: cat.label,
-    emoji: cat.emoji ?? "📦",
-    sort_order: sortOrder,
-  })
-  if (error) console.error("insertCustomCategory", error)
+  const base = { id: cat.id, label: cat.label, emoji: cat.emoji ?? "📦", sort_order: sortOrder }
+
+  const { error } = await db.from("custom_categories").insert({ ...base, member_id: memberId ?? null })
+  if (!error) return
+
+  // Retry without member_id if the column doesn't exist yet (pre-migration).
+  const { error: retryErr } = await db.from("custom_categories").insert(base)
+  if (retryErr) console.error("insertCustomCategory", retryErr)
 }
 
 // ── Notifications ─────────────────────────────────────────
@@ -258,6 +444,7 @@ export function mapNotificationRow(row: any): AppNotification {
 
 /** Load the most recent notifications addressed to a member. */
 export async function fetchNotifications(memberId: string): Promise<AppNotification[]> {
+  if (isGuestMode()) return []
   const db = tryGetSupabase()
   if (!db) return []
   const { data, error } = await db
@@ -272,6 +459,7 @@ export async function fetchNotifications(memberId: string): Promise<AppNotificat
 
 /** Insert many notifications at once (fan-out to every other group member). */
 export async function insertNotifications(list: AppNotification[]) {
+  if (isGuestMode()) return
   const db = tryGetSupabase()
   if (!db || list.length === 0) return
   const { error } = await db.from("notifications").insert(
@@ -291,6 +479,7 @@ export async function insertNotifications(list: AppNotification[]) {
 }
 
 export async function markNotificationsRead(memberId: string) {
+  if (isGuestMode()) return
   const db = tryGetSupabase()
   if (!db) return
   const { error } = await db

@@ -4,6 +4,8 @@ import type { SplitMode } from "./categories"
 export type Member = {
   id: string
   groupId: string
+  /** Supabase Auth user id this member belongs to (undefined = placeholder member) */
+  userId?: string
   name: string
   /** Supabase Storage public URL, or "" when the member has no photo yet. */
   avatar: string
@@ -20,12 +22,22 @@ export type Group = {
   id: string
   name: string
   members: Member[]
+  /** Supabase Storage public URL for the group image, or "" when none. */
+  avatar?: string
+  /** auth user id of the creator (Host) */
+  hostUserId?: string
+  /** unique token used to build the shareable invite link */
+  inviteToken?: string
+  /** short, human-friendly Room Code guests type on the login page to join */
+  roomCode?: string
 }
 
 export type Transaction = {
   id: string
   groupId: string
-  /** member id of who paid */
+  /** 'expense' = money out (default); 'income' = shared earnings split among members */
+  kind?: "expense" | "income"
+  /** member id of who paid (expense) or who received (income) */
   payerId: string
   amount: number
   detail: string
@@ -37,5 +49,8 @@ export type Transaction = {
   settled?: boolean
   createdAt: number
   hasSlip?: boolean
+  /** Displayable image URL: a signed URL (Supabase), object/data URL (local), or "" */
   slipUrl?: string
+  /** Storage path inside the private 'slips' bucket — what we persist to the DB. */
+  slipPath?: string
 }

@@ -1,9 +1,10 @@
 "use client"
 
 import { useRef, useState } from "react"
-import { X, Eye, EyeOff, Camera, Loader2, UserCog, Users, Palette, Lock, Trash2, UserPlus, Check } from "lucide-react"
+import { X, Eye, EyeOff, Camera, Loader2, UserCog, Users, Palette, Lock, Trash2, UserPlus, Check, ImagePlus, KeyRound, Copy } from "lucide-react"
 import { isCustomAvatar } from "./users"
 import { MemberAvatar } from "./member-avatar"
+import { GroupAvatar } from "./group-avatar"
 import { THEMES } from "./themes"
 import { cropToCircle, uploadAvatar } from "@/lib/storage"
 import { hashPin } from "@/lib/pin"
@@ -17,16 +18,35 @@ type Props = {
   onAddMember: (name: string) => void
   onRemoveMember: (id: string) => void
   onRenameGroup: (name: string) => void
-  onClose: () => void
+  /** persist the group's avatar URL ("" to remove) */
+  onSaveGroupAvatar: (avatarUrl: string) => void
+  /** signed-in account email + id, for the identity-mapping section */
+  authEmail?: string | null
+  authUserId?: string | null
+  /** bind the signed-in email to a member ("this member is me") */
+  onClaimMember?: (memberId: string) => void
+  /** mint/reveal the group's shareable Room Code; returns the code or null */
+  onGenerateRoomCode?: () => Promise<string | null>
+  /** whether the Room Code feature is available (signed-in, non-guest) */
+  roomCodeEnabled?: boolean
+  /** when true, render inline as a tab page instead of a floating modal */
+  embedded?: boolean
+  onClose?: () => void
 }
 
-export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMember, onRenameGroup, onClose }: Props) {
+export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMember, onRenameGroup, onSaveGroupAvatar, authEmail, authUserId, onClaimMember, onGenerateRoomCode, roomCodeEnabled, embedded, onClose }: Props) {
   const [name, setName] = useState(member.name)
   const [avatar, setAvatar] = useState(member.avatar)
   const [avatarBlob, setAvatarBlob] = useState<Blob | null>(null)
   const [themeId, setThemeId] = useState(member.themeId ?? "amber")
   const avatarInputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
+
+  // ── Group avatar ──
+  const [groupAvatar, setGroupAvatar] = useState(group.avatar ?? "")
+  const [groupAvatarBlob, setGroupAvatarBlob] = useState<Blob | null>(null)
+  const [groupAvatarRemoved, setGroupAvatarRemoved] = useState(false)
+  const groupAvatarInputRef = useRef<HTMLInputElement>(null)
 
   const [section, setSection] = useState<"main" | "pin">("main")
   const [pin, setPin] = useState("")
@@ -37,6 +57,33 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
 
   const [groupName, setGroupName] = useState(group.name)
   const [newMember, setNewMember] = useState("")
+
+  // ── Room Code (shareable, cloud-only) ──
+  const [roomCode, setRoomCode] = useState(group.roomCode ?? "")
+  const [roomBusy, setRoomBusy] = useState(false)
+  const [roomCopied, setRoomCopied] = useState(false)
+
+  async function handleGenerateRoomCode() {
+    if (!onGenerateRoomCode) return
+    setRoomBusy(true)
+    try {
+      const code = await onGenerateRoomCode()
+      if (code) setRoomCode(code)
+    } finally {
+      setRoomBusy(false)
+    }
+  }
+
+  async function handleCopyRoomCode() {
+    if (!roomCode) return
+    try {
+      await navigator.clipboard.writeText(roomCode)
+      setRoomCopied(true)
+      setTimeout(() => setRoomCopied(false), 1500)
+    } catch {
+      /* clipboard blocked — ignore */
+    }
+  }
 
   async function handleAvatarFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -50,6 +97,28 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
       reader.onload = (ev) => { if (typeof ev.target?.result === "string") setAvatar(ev.target.result) }
       reader.readAsDataURL(file)
     }
+  }
+
+  async function handleGroupAvatarFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setGroupAvatarRemoved(false)
+    try {
+      const blob = await cropToCircle(file)
+      setGroupAvatarBlob(blob)
+      setGroupAvatar(URL.createObjectURL(blob))
+    } catch {
+      const reader = new FileReader()
+      reader.onload = (ev) => { if (typeof ev.target?.result === "string") setGroupAvatar(ev.target.result) }
+      reader.readAsDataURL(file)
+    }
+    e.target.value = ""
+  }
+
+  function handleRemoveGroupAvatar() {
+    setGroupAvatar("")
+    setGroupAvatarBlob(null)
+    setGroupAvatarRemoved(true)
   }
 
   async function handleSave() {
@@ -71,10 +140,23 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
         updated.tint = activeTheme.tint
       }
       if (groupName.trim() && groupName.trim() !== group.name) onRenameGroup(groupName.trim())
+
+      // Group avatar add / edit / remove
+      if (groupAvatarBlob) {
+        if (isSupabaseConfigured) {
+          const url = await uploadAvatar(group.id, groupAvatarBlob)
+          if (url) onSaveGroupAvatar(url)
+        } else {
+          onSaveGroupAvatar(groupAvatar)
+        }
+      } else if (groupAvatarRemoved && (group.avatar ?? "") !== "") {
+        onSaveGroupAvatar("")
+      }
+
       if (Object.keys(updated).length > 0) onSave(updated)
     } finally {
       setUploading(false)
-      onClose()
+      onClose?.()
     }
   }
 
@@ -101,32 +183,29 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
   const customAvatar = isCustomAvatar(avatar)
   const activeTheme = THEMES.find((t) => t.id === themeId) ?? THEMES[0]
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
-      <button type="button" aria-label="ปิด" onClick={onClose} className="absolute inset-0 bg-foreground/40 backdrop-blur-sm" />
+  // Header is hidden for the embedded main section (the tab page provides the title);
+  // it stays for the PIN sub-section (back button) and for the modal variant.
+  const header = (section === "pin" || !embedded) ? (
+    <div className={`relative flex items-center justify-between px-5 ${embedded ? "pb-3 pt-1" : "border-b border-border/60 pb-3 pt-4"}`}>
+      {section === "pin" ? (
+        <button type="button" onClick={() => { setSection("main"); setPinError(""); setPin(""); setConfirmPin("") }} className="text-sm font-medium text-accent">← กลับ</button>
+      ) : (
+        <h2 className="text-base font-semibold text-foreground">ตั้งค่า</h2>
+      )}
+      {section === "pin" ? (
+        <h2 className="absolute left-1/2 -translate-x-1/2 text-base font-semibold text-foreground">ตั้งรหัสผ่าน</h2>
+      ) : !embedded ? (
+        <button type="button" onClick={onClose} aria-label="ปิด" className="grid size-8 place-items-center rounded-full bg-secondary text-muted-foreground transition active:scale-90">
+          <X className="size-4" />
+        </button>
+      ) : null}
+    </div>
+  ) : null
 
-      <div className="relative w-full max-w-md animate-in slide-in-from-bottom-4 fade-in overflow-hidden rounded-t-[2rem] shadow-2xl ring-1 ring-border duration-300 sm:rounded-[2rem]"
-        style={{ background: "linear-gradient(180deg, oklch(0.985 0.01 80), oklch(0.965 0.02 60))" }}
-      >
-        <div className="mx-auto mt-3 h-1.5 w-10 rounded-full bg-border sm:hidden" />
-
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-border/60 px-5 pb-3 pt-4">
-          {section === "pin" ? (
-            <button type="button" onClick={() => { setSection("main"); setPinError(""); setPin(""); setConfirmPin("") }} className="text-sm font-medium text-accent">← กลับ</button>
-          ) : (
-            <h2 className="text-base font-semibold text-foreground">ตั้งค่า</h2>
-          )}
-          {section === "pin" ? (
-            <h2 className="absolute left-1/2 -translate-x-1/2 text-base font-semibold text-foreground">ตั้งรหัสผ่าน</h2>
-          ) : (
-            <button type="button" onClick={onClose} aria-label="ปิด" className="grid size-8 place-items-center rounded-full bg-secondary text-muted-foreground transition active:scale-90">
-              <X className="size-4" />
-            </button>
-          )}
-        </div>
-
-        <div className="max-h-[74vh] space-y-4 overflow-y-auto px-5 py-5 pb-8">
+  const content = (
+    <>
+      {header}
+      <div className={embedded ? "space-y-4 px-5 pb-10 pt-1" : "max-h-[74vh] space-y-4 overflow-y-auto px-5 py-5 pb-8"}>
           {section === "main" && (
             <>
               {/* ── Profile section ── */}
@@ -193,6 +272,45 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
 
               {/* ── Group section ── */}
               <SectionCard icon={<Users className="size-4" />} title="กลุ่ม" accent={activeTheme.vars.accent}>
+                {/* Group image: add / edit / remove */}
+                <div className="mb-4 flex items-center gap-4">
+                  <button
+                    type="button"
+                    onClick={() => groupAvatarInputRef.current?.click()}
+                    className="group relative shrink-0"
+                    aria-label="เปลี่ยนรูปกลุ่ม"
+                  >
+                    <GroupAvatar group={{ name: groupName || group.name, avatar: groupAvatar }} size={64} className="shadow-sm ring-2 ring-border" />
+                    <span className="absolute inset-0 flex items-center justify-center rounded-[1.25rem] bg-foreground/0 transition group-hover:bg-foreground/25">
+                      <Camera className="size-5 text-white opacity-0 drop-shadow transition group-hover:opacity-100" />
+                    </span>
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-foreground">รูปกลุ่ม</p>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <button
+                        type="button"
+                        onClick={() => groupAvatarInputRef.current?.click()}
+                        className="flex items-center gap-1 text-xs font-medium text-accent underline underline-offset-2"
+                      >
+                        <ImagePlus className="size-3.5" />
+                        {groupAvatar ? "เปลี่ยนรูป" : "เพิ่มรูป"}
+                      </button>
+                      {groupAvatar && (
+                        <button
+                          type="button"
+                          onClick={handleRemoveGroupAvatar}
+                          className="flex items-center gap-1 text-xs font-medium text-destructive underline underline-offset-2"
+                        >
+                          <Trash2 className="size-3.5" />
+                          ลบรูป
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <input ref={groupAvatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleGroupAvatarFile} />
+                </div>
+
                 <label className="text-xs font-semibold text-muted-foreground">ชื่อกลุ่ม</label>
                 <input
                   type="text"
@@ -203,13 +321,33 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                 />
 
                 <p className="mb-2 mt-4 text-xs font-semibold text-muted-foreground">สมาชิก ({group.members.length})</p>
+                {authEmail && (
+                  <p className="mb-2 text-[11px] leading-relaxed text-muted-foreground">
+                    ผูกอีเมลของคุณ (<span className="font-medium text-foreground">{authEmail}</span>) กับสมาชิก
+                    เพื่อให้ครั้งหน้าเข้าโปรไฟล์นี้อัตโนมัติ
+                  </p>
+                )}
                 <ul className="space-y-2">
-                  {group.members.map((m) => (
+                  {group.members.map((m) => {
+                    const mine = !!authUserId && m.userId === authUserId
+                    const claimedByOther = !!m.userId && !mine
+                    return (
                     <li key={m.id} className="flex items-center gap-3 rounded-xl bg-secondary px-3 py-2">
                       <MemberAvatar member={m} size={32} />
                       <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
                         {m.name}{m.id === member.id ? " (คุณ)" : ""}
+                        {mine && <span className="ml-1.5 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-medium text-accent">บัญชีของคุณ</span>}
+                        {claimedByOther && <span className="ml-1.5 rounded-full bg-card px-2 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-border">ผูกอีเมลแล้ว</span>}
                       </span>
+                      {authUserId && !mine && !claimedByOther && onClaimMember && (
+                        <button
+                          type="button"
+                          onClick={() => onClaimMember(m.id)}
+                          className="shrink-0 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground transition active:scale-95"
+                        >
+                          นี่คือฉัน
+                        </button>
+                      )}
                       {m.id !== member.id && (
                         <button
                           type="button"
@@ -221,7 +359,8 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                         </button>
                       )}
                     </li>
-                  ))}
+                    )
+                  })}
                 </ul>
 
                 <div className="mt-3 flex items-center gap-2">
@@ -245,6 +384,41 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                   </button>
                 </div>
               </SectionCard>
+
+              {/* ── Room Code section (share this group with guests) ── */}
+              {roomCodeEnabled && (
+                <SectionCard icon={<KeyRound className="size-4" />} title="รหัสห้อง (Room Code)" accent={activeTheme.vars.accent}>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    แชร์รหัสนี้ให้เพื่อน เพื่อให้เข้าถึงห้องนี้ได้จากหน้าเข้าสู่ระบบ
+                    โดยไม่ต้องสมัครบัญชี
+                  </p>
+                  {roomCode ? (
+                    <div className="mt-3 flex items-center gap-2">
+                      <div className="flex-1 rounded-xl bg-secondary px-4 py-3 text-center text-lg font-bold tracking-[0.3em] text-foreground">
+                        {roomCode}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleCopyRoomCode}
+                        aria-label="คัดลอกรหัสห้อง"
+                        className="grid size-12 shrink-0 place-items-center rounded-xl bg-accent text-accent-foreground shadow-sm transition active:scale-95"
+                      >
+                        {roomCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={handleGenerateRoomCode}
+                      disabled={roomBusy}
+                      className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-accent py-3 text-sm font-semibold text-accent-foreground shadow-sm transition active:scale-[0.98] disabled:opacity-60"
+                    >
+                      {roomBusy ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />}
+                      สร้างรหัสห้อง
+                    </button>
+                  )}
+                </SectionCard>
+              )}
 
               {/* Save */}
               <button
@@ -292,7 +466,23 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
               </button>
             </div>
           )}
-        </div>
+      </div>
+    </>
+  )
+
+  // Embedded (bottom-nav tab) — render inline, no overlay.
+  if (embedded) return <div className="pt-1">{content}</div>
+
+  // Modal variant (kept for completeness).
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+      <button type="button" aria-label="ปิด" onClick={onClose} className="absolute inset-0 bg-foreground/40 backdrop-blur-sm" />
+      <div
+        className="relative w-full max-w-md animate-in slide-in-from-bottom-4 fade-in overflow-hidden rounded-t-[2rem] shadow-2xl ring-1 ring-border duration-300 sm:rounded-[2rem]"
+        style={{ background: "linear-gradient(180deg, oklch(0.985 0.01 80), oklch(0.965 0.02 60))" }}
+      >
+        <div className="mx-auto mt-3 h-1.5 w-10 rounded-full bg-border sm:hidden" />
+        {content}
       </div>
     </div>
   )
