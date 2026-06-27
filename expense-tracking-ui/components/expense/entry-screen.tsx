@@ -4,18 +4,21 @@ import { useMemo, useState } from "react"
 import Image from "next/image"
 import { ChevronLeft, Plus, Users, ArrowRight, X, UserPlus } from "lucide-react"
 import { MemberAvatar } from "./member-avatar"
+import { GroupAvatar } from "./group-avatar"
 import type { Group, Member } from "./types"
 
 type Props = {
   groups: Group[]
+  /** when set, open straight to the member picker for this group */
+  initialGroupId?: string | null
   onEnter: (group: Group, member: Member) => void
   onCreateGroup: (name: string) => Promise<Group | null>
   onAddMember: (groupId: string, draft: { name: string }) => Promise<Member | null>
 }
 
-export function EntryScreen({ groups, onEnter, onCreateGroup, onAddMember }: Props) {
-  const [step, setStep] = useState<"group" | "member">("group")
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+export function EntryScreen({ groups, initialGroupId, onEnter, onCreateGroup, onAddMember }: Props) {
+  const [step, setStep] = useState<"group" | "member">(initialGroupId ? "member" : "group")
+  const [selectedId, setSelectedId] = useState<string | null>(initialGroupId ?? null)
   const [leaving, setLeaving] = useState<string | null>(null)
 
   const [creatingGroup, setCreatingGroup] = useState(false)
@@ -118,9 +121,7 @@ export function EntryScreen({ groups, onEnter, onCreateGroup, onAddMember }: Pro
                     onClick={() => openGroup(g)}
                     className="group flex w-full items-center gap-3 rounded-[1.4rem] bg-card p-3.5 text-left shadow-sm ring-1 ring-border transition active:scale-[0.99] hover:ring-accent/40"
                   >
-                    <span className="grid size-12 shrink-0 place-items-center rounded-2xl bg-accent/12 text-lg font-bold text-accent">
-                      {g.name.trim().charAt(0) || "?"}
-                    </span>
+                    <GroupAvatar group={g} size={48} className="rounded-2xl" />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-base font-semibold text-foreground">{g.name}</p>
                       <div className="mt-1 flex items-center gap-2">

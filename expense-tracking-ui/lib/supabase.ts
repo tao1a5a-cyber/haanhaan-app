@@ -13,7 +13,14 @@ export function getSupabase(): SupabaseClient {
       throw new Error("Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local")
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    _client = createClient<any>(url, anonKey, { auth: { persistSession: false } })
+    _client = createClient<any>(url, anonKey, {
+      auth: {
+        // Social login needs the session to survive the OAuth redirect and reloads.
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+      },
+    })
   }
   return _client
 }

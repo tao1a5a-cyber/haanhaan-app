@@ -86,3 +86,25 @@ export async function getSlipUrl(path: string): Promise<string | null> {
   if (error) { console.error("getSlipUrl", error); return null }
   return data.signedUrl
 }
+
+/**
+ * Batch-resolve many slip paths into signed URLs in one request.
+ * Returns a `path → signedUrl` map; paths that fail are omitted.
+ */
+export async function getSlipUrls(paths: string[]): Promise<Record<string, string>> {
+  const db = tryGetSupabase()
+  const unique = Array.from(new Set(paths.filter(Boolean)))
+  if (!db || unique.length === 0) return {}
+
+  const { data, error } = await db.storage
+    .from(SLIP_BUCKET)
+    .createSignedUrls(unique, 3600)
+
+  if (error) { console.error("getSlipUrls", error); return {} }
+
+  const map: Record<string, string> = {}
+  for (const row of data ?? []) {
+    if (row.signedUrl && row.path) map[row.path] = row.signedUrl
+  }
+  return map
+}

@@ -1,4 +1,5 @@
 import { tryGetSupabase } from "./supabase"
+import { getSlipUrls } from "./storage"
 import { makeCustomCategory, type Category } from "@/components/expense/categories"
 import type { Group, Member, Transaction } from "@/components/expense/types"
 import type { AppNotification } from "@/components/expense/notifications"
@@ -10,11 +11,23 @@ function mapMember(row: any): Member {
   return {
     id: row.id,
     groupId: row.group_id,
+    userId: row.user_id ?? undefined,
     name: row.name,
     avatar: row.avatar_url ?? "",
     tint: row.tint ?? "oklch(0.93 0.05 70)",
     themeId: row.theme_id ?? undefined,
     pinSalt: row.pin_salt ?? row.id,
+  }
+}
+
+function mapGroup(row: any, members: Member[]): Group {
+  return {
+    id: row.id,
+    name: row.name,
+    members,
+    avatar: row.avatar_url ?? "",
+    hostUserId: row.host_user_id ?? undefined,
+    inviteToken: row.invite_token ?? undefined,
   }
 }
 
@@ -38,20 +51,67 @@ export async function fetchGroups(): Promise<Group[]> {
     byGroup.set(m.groupId, list)
   }
 
-  return (groupRows ?? []).map((g: any) => ({
-    id: g.id,
-    name: g.name,
-    members: byGroup.get(g.id) ?? [],
-  }))
+  return (groupRows ?? []).map((g: any) => mapGroup(g, byGroup.get(g.id) ?? []))
 }
 
-/** Create a group and return its id (null offline / on error). */
-export async function createGroup(name: string): Promise<string | null> {
+/** Load only the groups the given auth user is a member of, with members nested. */
+export async function fetchGroupsForUser(userId: string): Promise<Group[]> {
+  const db = tryGetSupabase()
+  if (!db) return []
+
+  const { data: mine, error: meErr } = await db
+    .from("members")
+    .select("group_id")
+    .eq("user_id", userId)
+  if (meErr) { console.error("fetchGroupsForUser", meErr); return [] }
+
+  const groupIds = Array.from(new Set((mine ?? []).map((r: any) => r.group_id)))
+  if (groupIds.length === 0) return []
+
+  const [{ data: groupRows, error: gErr }, { data: memberRows, error: mErr }] = await Promise.all([
+    db.from("groups").select("*").in("id", groupIds).order("created_at", { ascending: true }),
+    db.from("members").select("*").in("group_id", groupIds).order("created_at", { ascending: true }),
+  ])
+  if (gErr) { console.error("fetchGroupsForUser groups", gErr); return [] }
+  if (mErr) { console.error("fetchGroupsForUser members", mErr); return [] }
+
+  const byGroup = new Map<string, Member[]>()
+  for (const row of memberRows ?? []) {
+    const m = mapMember(row)
+    const list = byGroup.get(m.groupId) ?? []
+    list.push(m)
+    byGroup.set(m.groupId, list)
+  }
+  return (groupRows ?? []).map((g: any) => mapGroup(g, byGroup.get(g.id) ?? []))
+}
+
+/** Look up a group by its invite token, with members nested (null if not found). */
+export async function fetchGroupByToken(token: string): Promise<Group | null> {
   const db = tryGetSupabase()
   if (!db) return null
-  const { data, error } = await db.from("groups").insert({ name }).select("id").single()
+  const { data: g, error } = await db.from("groups").select("*").eq("invite_token", token).maybeSingle()
+  if (error) { console.error("fetchGroupByToken", error); return null }
+  if (!g) return null
+  const { data: memberRows, error: mErr } = await db
+    .from("members")
+    .select("*")
+    .eq("group_id", (g as any).id)
+    .order("created_at", { ascending: true })
+  if (mErr) { console.error("fetchGroupByToken members", mErr); return null }
+  return mapGroup(g, (memberRows ?? []).map(mapMember))
+}
+
+/** Create a group owned by `hostUserId`; returns the new group (with invite token) or null. */
+export async function createGroup(name: string, hostUserId?: string): Promise<Group | null> {
+  const db = tryGetSupabase()
+  if (!db) return null
+  const { data, error } = await db
+    .from("groups")
+    .insert({ name, host_user_id: hostUserId ?? null })
+    .select("*")
+    .single()
   if (error) { console.error("createGroup", error); return null }
-  return (data as any)?.id ?? null
+  return mapGroup(data, [])
 }
 
 export async function renameGroup(groupId: string, name: string) {
@@ -59,6 +119,14 @@ export async function renameGroup(groupId: string, name: string) {
   if (!db) return
   const { error } = await db.from("groups").update({ name }).eq("id", groupId)
   if (error) console.error("renameGroup", error)
+}
+
+/** Set (or clear with "") the group's avatar image URL. */
+export async function updateGroupAvatar(groupId: string, avatarUrl: string) {
+  const db = tryGetSupabase()
+  if (!db) return
+  const { error } = await db.from("groups").update({ avatar_url: avatarUrl || null }).eq("id", groupId)
+  if (error) console.error("updateGroupAvatar", error)
 }
 
 /** Insert a member; returns the created member (with db id) or null. */
@@ -137,7 +205,14 @@ export async function fetchTransactions(groupId: string): Promise<Transaction[]>
 
   if (error) { console.error("fetchTransactions", error); return [] }
 
-  return (data ?? []).map((row: any) => ({
+  const rows = data ?? []
+
+  // Resolve every private slip path into a short-lived signed URL in one batch,
+  // so <img src> can actually load the thumbnail (raw paths are not fetchable).
+  const slipPaths = rows.map((r: any) => r.slip_path).filter(Boolean) as string[]
+  const signed = await getSlipUrls(slipPaths)
+
+  return rows.map((row: any) => ({
     id: row.id,
     groupId: row.group_id,
     payerId: row.payer_id,
@@ -147,7 +222,8 @@ export async function fetchTransactions(groupId: string): Promise<Transaction[]>
     categoryId: row.category_id,
     split: row.split as Transaction["split"],
     settled: row.settled,
-    slipUrl: row.slip_path ?? undefined,
+    slipPath: row.slip_path ?? undefined,
+    slipUrl: row.slip_path ? signed[row.slip_path] ?? undefined : undefined,
     hasSlip: Boolean(row.slip_path),
     createdAt: new Date(row.created_at).getTime(),
   }))
@@ -172,7 +248,7 @@ export async function insertTransaction(tx: Transaction) {
     shares: tx.shares,
     category_id: tx.categoryId,
     split: tx.split,
-    slip_path: tx.slipUrl ?? null,
+    slip_path: tx.slipPath ?? null,
     settled: tx.settled ?? false,
     created_at: new Date(tx.createdAt).toISOString(),
   })
@@ -190,6 +266,7 @@ export async function updateTransaction(tx: Transaction) {
       shares: tx.shares,
       category_id: tx.categoryId,
       split: tx.split,
+      slip_path: tx.slipPath ?? null,
       settled: tx.settled ?? false,
     })
     .eq("id", tx.id)
@@ -216,9 +293,26 @@ export async function settleAllTransactions(groupId: string) {
 
 // ── Custom categories (global) ────────────────────────────
 
-export async function fetchCustomCategories(): Promise<Category[]> {
+/**
+ * Custom categories scoped to one member. Legacy rows with a null member_id
+ * stay visible to everyone as a shared fallback.
+ */
+export async function fetchCustomCategories(memberId?: string): Promise<Category[]> {
   const db = tryGetSupabase()
   if (!db) return []
+
+  if (memberId) {
+    // Scoped query — owner's rows plus legacy global (null) rows.
+    const { data, error } = await db
+      .from("custom_categories")
+      .select("*")
+      .or(`member_id.eq.${memberId},member_id.is.null`)
+      .order("sort_order", { ascending: true })
+    if (!error) return (data ?? []).map((row: any, i: number) => makeCustomCategory(row.label, row.emoji, i))
+    // Falls through to the unscoped query when the member_id column is absent
+    // (i.e. migration 0003 hasn't been applied yet).
+  }
+
   const { data, error } = await db
     .from("custom_categories")
     .select("*")
@@ -227,16 +321,17 @@ export async function fetchCustomCategories(): Promise<Category[]> {
   return (data ?? []).map((row: any, i: number) => makeCustomCategory(row.label, row.emoji, i))
 }
 
-export async function insertCustomCategory(cat: Category, sortOrder: number) {
+export async function insertCustomCategory(cat: Category, sortOrder: number, memberId?: string) {
   const db = tryGetSupabase()
   if (!db) return
-  const { error } = await db.from("custom_categories").insert({
-    id: cat.id,
-    label: cat.label,
-    emoji: cat.emoji ?? "📦",
-    sort_order: sortOrder,
-  })
-  if (error) console.error("insertCustomCategory", error)
+  const base = { id: cat.id, label: cat.label, emoji: cat.emoji ?? "📦", sort_order: sortOrder }
+
+  const { error } = await db.from("custom_categories").insert({ ...base, member_id: memberId ?? null })
+  if (!error) return
+
+  // Retry without member_id if the column doesn't exist yet (pre-migration).
+  const { error: retryErr } = await db.from("custom_categories").insert(base)
+  if (retryErr) console.error("insertCustomCategory", retryErr)
 }
 
 // ── Notifications ─────────────────────────────────────────

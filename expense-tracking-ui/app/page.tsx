@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { X } from "lucide-react"
 import { AppHeader } from "@/components/expense/app-header"
 import { BalanceCard } from "@/components/expense/balance-card"
 import { AddTransaction } from "@/components/expense/add-transaction"
@@ -27,6 +28,7 @@ import {
   fetchGroups,
   createGroup,
   renameGroup,
+  updateGroupAvatar,
   addMember,
   updateMember,
   removeMember,
@@ -43,13 +45,16 @@ import {
   markNotificationsRead,
   mapNotificationRow,
 } from "@/lib/db"
-import { uploadSlip } from "@/lib/storage"
+import { uploadSlip, getSlipUrl } from "@/lib/storage"
 import { memberBalances, myNet } from "@/lib/balances"
 import { verifyPin } from "@/lib/pin"
+import { signOut } from "@/lib/auth"
+import { loadLastContext, saveLastContext, clearLastContext } from "@/lib/prefs"
 
 const tabTitles: Record<string, string> = {
   summary: "สรุปค่าใช้จ่าย",
   history: "ประวัติรายการ",
+  settings: "ตั้งค่า",
 }
 
 export default function Page() {
@@ -61,22 +66,46 @@ export default function Page() {
   const [tab, setTab] = useState("home")
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [showSettlement, setShowSettlement] = useState(false)
-  const [showSettings, setShowSettings] = useState(false)
+  // add-expense form sheet opened by the central FAB
+  const [showAddForm, setShowAddForm] = useState(false)
   const [loading, setLoading] = useState(true)
   const [pending, setPending] = useState<{ member: Member; hash: string } | null>(null)
+  // when re-entering, jump straight to the member picker for this group
+  const [entryGroupId, setEntryGroupId] = useState<string | null>(null)
 
-  // ── Bootstrap: load groups + categories ─────────────────
+  // ── Bootstrap: load groups, then restore last context ───
   useEffect(() => {
     async function boot() {
       if (isSupabaseConfigured) {
-        const [gs, cats] = await Promise.all([fetchGroups(), fetchCustomCategories()])
+        const gs = await fetchGroups()
         setGroups(gs)
-        setCustomCategories(cats)
+
+        // Reduce clicks: jump back into the last group + member the user used.
+        const last = loadLastContext()
+        if (last) {
+          const g = gs.find((x) => x.id === last.groupId)
+          const m = g?.members.find((x) => x.id === last.memberId)
+          if (g && m) { setEntryGroupId(g.id); await enterAs(g, m) }
+        }
       }
       setLoading(false)
     }
     boot()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // ── Custom categories are scoped to the active member ───
+  useEffect(() => {
+    if (!member || !isSupabaseConfigured) { setCustomCategories([]); return }
+    let active = true
+    fetchCustomCategories(member.id).then((cats) => { if (active) setCustomCategories(cats) })
+    return () => { active = false }
+  }, [member?.id])
+
+  // ── Remember the active group + member for next open ────
+  useEffect(() => {
+    if (group && member) saveLastContext({ groupId: group.id, memberId: member.id })
+  }, [group?.id, member?.id])
 
   // ── Load the active group's transactions ────────────────
   useEffect(() => {
@@ -156,7 +185,12 @@ export default function Page() {
 
     if (slipFile && isSupabaseConfigured) {
       const path = await uploadSlip(newTx.id, slipFile)
-      if (path) { newTx.slipUrl = path; newTx.hasSlip = true }
+      if (path) {
+        newTx.slipPath = path
+        newTx.hasSlip = true
+        // Resolve a signed URL so the thumbnail renders (path alone isn't fetchable).
+        newTx.slipUrl = (await getSlipUrl(path)) ?? newTx.slipUrl
+      }
     }
 
     setTransactions((prev) => [newTx, ...prev])
@@ -177,7 +211,7 @@ export default function Page() {
   function handleAddCategory(label: string, emoji: string) {
     const cat = makeCustomCategory(label, emoji, customCategories.length)
     setCustomCategories((prev) => [...prev, cat])
-    insertCustomCategory(cat, customCategories.length)
+    insertCustomCategory(cat, customCategories.length, member?.id)
     return cat.id
   }
 
@@ -263,6 +297,40 @@ export default function Page() {
     renameGroup(group.id, name)
   }
 
+  function handleSaveGroupAvatar(avatarUrl: string) {
+    if (!group) return
+    setGroups((prev) => prev.map((g) => (g.id === group.id ? { ...g, avatar: avatarUrl } : g)))
+    setGroup((prev) => (prev ? { ...prev, avatar: avatarUrl } : prev))
+    updateGroupAvatar(group.id, avatarUrl)
+  }
+
+  // ── Header navigation ────────────────────────────────────
+  /** Switch the active group → reopen the member picker for it. */
+  function handleSelectGroup(g: Group) {
+    setEntryGroupId(g.id)
+    setMember(null)
+    setGroup(null)
+    setTab("home")
+  }
+
+  /** "Back to Home" → the 'who are you?' profile picker for the current group. */
+  function handleBackToHome() {
+    setEntryGroupId(group?.id ?? null)
+    setMember(null)
+    setGroup(null)
+    setTab("home")
+  }
+
+  /** Sign out → clear cached context and return to group selection. */
+  async function handleLogout() {
+    clearLastContext()
+    setEntryGroupId(null)
+    setMember(null)
+    setGroup(null)
+    setTab("home")
+    await signOut()
+  }
+
   function handleMarkAllRead() {
     if (!member) return
     setNotifications((prev) => prev.map((n) => (n.recipientId === member.id ? { ...n, read: true } : n)))
@@ -298,6 +366,7 @@ export default function Page() {
     return (
       <EntryScreen
         groups={groups}
+        initialGroupId={entryGroupId}
         onEnter={enterAs}
         onCreateGroup={handleCreateGroup}
         onAddMember={handleAddMember}
@@ -324,12 +393,13 @@ export default function Page() {
           <>
             <AppHeader
               group={group}
+              groups={groups}
               member={member}
               notifications={myNotifications}
-              onSwitchMember={() => { setMember(null); setTab("home") }}
-              onSwitchGroup={() => { setMember(null); setGroup(null); setTab("home") }}
+              onSelectGroup={handleSelectGroup}
+              onBackToHome={handleBackToHome}
+              onLogout={handleLogout}
               onMarkAllRead={handleMarkAllRead}
-              onOpenSettings={() => setShowSettings(true)}
             />
             <div className="space-y-5 pt-2">
               <BalanceCard
@@ -337,13 +407,6 @@ export default function Page() {
                 members={group.members}
                 currentMemberId={member.id}
                 onRequestSettle={() => setShowSettlement(true)}
-              />
-              <AddTransaction
-                categories={allCategories}
-                members={group.members}
-                currentMember={member}
-                onAdd={handleAdd}
-                onAddCategory={handleAddCategory}
               />
               <RecentList
                 items={transactions}
@@ -366,7 +429,12 @@ export default function Page() {
         )}
 
         {tab === "summary" && (
-          <SummaryView transactions={transactions} categories={allCategories} members={group.members} />
+          <SummaryView
+            transactions={transactions}
+            categories={allCategories}
+            members={group.members}
+            currentMember={member}
+          />
         )}
 
         {tab === "history" && (
@@ -380,20 +448,55 @@ export default function Page() {
             onNotify={notifyOthers}
           />
         )}
+
+        {tab === "settings" && (
+          <SettingsPanel
+            embedded
+            group={group}
+            member={member}
+            onSave={handleSettingsSave}
+            onAddMember={handleAddGroupMember}
+            onRemoveMember={handleRemoveMember}
+            onRenameGroup={handleRenameGroup}
+            onSaveGroupAvatar={handleSaveGroupAvatar}
+          />
+        )}
       </div>
 
-      <BottomNav active={tab} onChange={setTab} />
+      <BottomNav active={tab} onChange={setTab} onAdd={() => setShowAddForm(true)} />
 
-      {showSettings && (
-        <SettingsPanel
-          group={group}
-          member={member}
-          onSave={handleSettingsSave}
-          onAddMember={handleAddGroupMember}
-          onRemoveMember={handleRemoveMember}
-          onRenameGroup={handleRenameGroup}
-          onClose={() => setShowSettings(false)}
-        />
+      {/* One-click add: the FAB opens the expense form directly */}
+      {showAddForm && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+          <button
+            type="button"
+            aria-label="ปิด"
+            onClick={() => setShowAddForm(false)}
+            className="absolute inset-0 bg-foreground/30 backdrop-blur-sm"
+          />
+          <div className="relative max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-[2rem] bg-background pb-4 shadow-2xl ring-1 ring-border animate-in slide-in-from-bottom-4 fade-in duration-300 sm:rounded-[2rem]">
+            <div className="sticky top-0 z-10 flex items-center justify-between bg-background/90 px-5 pb-2 pt-4 backdrop-blur-sm">
+              <div className="absolute left-1/2 top-1.5 h-1.5 w-10 -translate-x-1/2 rounded-full bg-border sm:hidden" />
+              <h2 className="text-base font-semibold text-foreground">เพิ่มรายจ่าย</h2>
+              <button
+                type="button"
+                onClick={() => setShowAddForm(false)}
+                aria-label="ปิด"
+                className="grid size-8 place-items-center rounded-full bg-secondary text-muted-foreground transition active:scale-90"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            <AddTransaction
+              categories={allCategories}
+              members={group.members}
+              currentMember={member}
+              onAdd={handleAdd}
+              onAddCategory={handleAddCategory}
+              onSubmitted={() => setShowAddForm(false)}
+            />
+          </div>
+        </div>
       )}
 
       {showSettlement && (

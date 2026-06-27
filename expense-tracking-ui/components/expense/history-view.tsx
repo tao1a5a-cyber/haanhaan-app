@@ -147,6 +147,8 @@ export function HistoryView({
       split: editing.split,
       hasSlip: !!editing.slipUrl,
       slipUrl: editing.slipUrl,
+      // Clear the stored path when the slip is removed; otherwise keep the original.
+      slipPath: editing.slipUrl ? editing.tx.slipPath : undefined,
       shares: recomputeShares(editing.tx, amountNum, editing.split),
     }
     onEdit(updated)

@@ -1,8 +1,9 @@
 "use client"
 
-import { useState } from "react"
-import { Bell, Users, X, CheckCheck, ChevronDown } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { Bell, Users, X, CheckCheck, ChevronDown, Home, LogOut, Check, MoreVertical } from "lucide-react"
 import { MemberAvatar } from "./member-avatar"
+import { GroupAvatar } from "./group-avatar"
 import type { Group, Member } from "./types"
 import type { AppNotification } from "./notifications"
 
@@ -31,33 +32,100 @@ const typeIcon: Record<AppNotification["type"], string> = {
 
 type Props = {
   group: Group
+  groups: Group[]
   member: Member
   notifications: AppNotification[]
-  onSwitchMember?: () => void
-  onSwitchGroup?: () => void
+  /** switch the active group (top-left dropdown) */
+  onSelectGroup?: (group: Group) => void
+  /** go back to the "who are you?" profile selection page */
+  onBackToHome?: () => void
+  /** sign out (clears cached session) */
+  onLogout?: () => void
   onMarkAllRead?: () => void
-  onOpenSettings?: () => void
 }
 
-export function AppHeader({ group, member, notifications, onSwitchMember, onSwitchGroup, onMarkAllRead, onOpenSettings }: Props) {
+/** Generic click-outside hook for the two dropdowns. */
+function useClickOutside(onOutside: () => void) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    function handle(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onOutside()
+    }
+    document.addEventListener("mousedown", handle)
+    return () => document.removeEventListener("mousedown", handle)
+  }, [onOutside])
+  return ref
+}
+
+export function AppHeader({
+  group,
+  groups,
+  member,
+  notifications,
+  onSelectGroup,
+  onBackToHome,
+  onLogout,
+  onMarkAllRead,
+}: Props) {
   const [showPanel, setShowPanel] = useState(false)
+  const [showGroups, setShowGroups] = useState(false)
+  const [showUserMenu, setShowUserMenu] = useState(false)
   const unread = notifications.filter((n) => !n.read).length
+
+  const groupRef = useClickOutside(() => setShowGroups(false))
+  const userRef = useClickOutside(() => setShowUserMenu(false))
 
   return (
     <>
       <header className="px-5 pt-6 pb-2">
-        {/* group chip + actions */}
+        {/* group selector (left) + actions (right) */}
         <div className="flex items-center justify-between">
-          <button
-            type="button"
-            onClick={onSwitchGroup}
-            className="flex items-center gap-1.5 rounded-full bg-card px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-border transition active:scale-95"
-          >
-            <Users className="size-3.5 text-accent" />
-            <span className="max-w-[10rem] truncate">{group.name}</span>
-            <ChevronDown className="size-3.5 text-muted-foreground" />
-          </button>
+          {/* ── Group selector dropdown ── */}
+          <div ref={groupRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setShowGroups((v) => !v)}
+              aria-label="เลือกกลุ่ม"
+              className="flex items-center gap-2 rounded-full bg-card py-1.5 pl-1.5 pr-3 text-xs font-semibold text-foreground shadow-sm ring-1 ring-border transition active:scale-95"
+            >
+              <GroupAvatar group={group} size={26} />
+              <span className="max-w-[8.5rem] truncate">{group.name}</span>
+              <ChevronDown className={`size-3.5 text-muted-foreground transition ${showGroups ? "rotate-180" : ""}`} />
+            </button>
 
+            {showGroups && (
+              <div className="absolute left-0 top-full z-50 mt-2 w-60 origin-top-left animate-in fade-in slide-in-from-top-1 rounded-2xl bg-card p-1.5 shadow-2xl ring-1 ring-border duration-150">
+                <p className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  กลุ่มของคุณ
+                </p>
+                <ul className="max-h-72 overflow-y-auto">
+                  {groups.map((g) => {
+                    const active = g.id === group.id
+                    return (
+                      <li key={g.id}>
+                        <button
+                          type="button"
+                          onClick={() => { setShowGroups(false); if (!active) onSelectGroup?.(g) }}
+                          className={`flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition active:scale-[0.98] ${
+                            active ? "bg-accent/12" : "hover:bg-secondary"
+                          }`}
+                        >
+                          <GroupAvatar group={g} size={34} />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-sm font-semibold text-foreground">{g.name}</p>
+                            <p className="text-xs text-muted-foreground">{g.members.length} คน</p>
+                          </div>
+                          {active && <Check className="size-4 shrink-0 text-accent" />}
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            )}
+          </div>
+
+          {/* ── Notifications + user options ── */}
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -70,30 +138,57 @@ export function AppHeader({ group, member, notifications, onSwitchMember, onSwit
                 <span className="absolute right-2 top-2 flex size-[9px] items-center justify-center rounded-full bg-accent ring-2 ring-card" />
               )}
             </button>
-            <button
-              type="button"
-              onClick={onSwitchMember}
-              aria-label="สลับสมาชิก"
-              className="grid size-10 place-items-center rounded-full bg-card text-foreground shadow-sm ring-1 ring-border transition active:scale-95"
-            >
-              <ChevronDown className="size-[18px]" />
-            </button>
+
+            <div ref={userRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setShowUserMenu((v) => !v)}
+                aria-label="ตัวเลือกผู้ใช้"
+                className="grid size-10 place-items-center rounded-full bg-card text-foreground shadow-sm ring-1 ring-border transition active:scale-95"
+              >
+                <MoreVertical className="size-[18px]" />
+              </button>
+
+              {showUserMenu && (
+                <div className="absolute right-0 top-full z-50 mt-2 w-52 origin-top-right animate-in fade-in slide-in-from-top-1 rounded-2xl bg-card p-1.5 shadow-2xl ring-1 ring-border duration-150">
+                  <div className="flex items-center gap-2.5 px-2.5 py-2">
+                    <MemberAvatar member={member} size={34} />
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-foreground">{member.name}</p>
+                      <p className="truncate text-xs text-muted-foreground">{group.name}</p>
+                    </div>
+                  </div>
+                  <div className="my-1 h-px bg-border" />
+                  <button
+                    type="button"
+                    onClick={() => { setShowUserMenu(false); onBackToHome?.() }}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-left text-sm font-medium text-foreground transition hover:bg-secondary active:scale-[0.98]"
+                  >
+                    <Home className="size-4 text-muted-foreground" />
+                    กลับหน้าแรก
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setShowUserMenu(false); onLogout?.() }}
+                    className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2.5 text-left text-sm font-medium text-destructive transition hover:bg-destructive/10 active:scale-[0.98]"
+                  >
+                    <LogOut className="size-4" />
+                    ออกจากระบบ
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* greeting + current member */}
-        <button
-          type="button"
-          onClick={onOpenSettings}
-          aria-label="ตั้งค่าโปรไฟล์"
-          className="mt-3 flex items-center gap-3 transition active:scale-[0.99]"
-        >
+        {/* greeting + current member (display only — settings live in the bottom nav) */}
+        <div className="mt-3 flex items-center gap-3">
           <MemberAvatar member={member} size={44} className="shadow-sm ring-1 ring-border" />
           <div className="text-left leading-tight">
             <p className="text-xs text-muted-foreground">{greeting()}</p>
             <p className="text-base font-semibold text-foreground">{member.name}</p>
           </div>
-        </button>
+        </div>
       </header>
 
       {/* Notification panel */}

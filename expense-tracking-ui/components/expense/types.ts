@@ -4,6 +4,8 @@ import type { SplitMode } from "./categories"
 export type Member = {
   id: string
   groupId: string
+  /** Supabase Auth user id this member belongs to (undefined = placeholder member) */
+  userId?: string
   name: string
   /** Supabase Storage public URL, or "" when the member has no photo yet. */
   avatar: string
@@ -20,6 +22,12 @@ export type Group = {
   id: string
   name: string
   members: Member[]
+  /** Supabase Storage public URL for the group image, or "" when none. */
+  avatar?: string
+  /** auth user id of the creator (Host) */
+  hostUserId?: string
+  /** unique token used to build the shareable invite link */
+  inviteToken?: string
 }
 
 export type Transaction = {
@@ -37,5 +45,8 @@ export type Transaction = {
   settled?: boolean
   createdAt: number
   hasSlip?: boolean
+  /** Displayable image URL: a signed URL (Supabase), object/data URL (local), or "" */
   slipUrl?: string
+  /** Storage path inside the private 'slips' bucket — what we persist to the DB. */
+  slipPath?: string
 }

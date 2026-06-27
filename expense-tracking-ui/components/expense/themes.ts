@@ -12,10 +12,11 @@ export type ThemePreset = {
   }
 }
 
+// Minimal curated palette with friendly, easy-to-pick names.
 export const THEMES: ThemePreset[] = [
   {
     id: "amber",
-    label: "อำพัน",
+    label: "Earth Tone",
     swatch: "oklch(0.62 0.16 52)",
     tint: "oklch(0.93 0.05 70)",
     vars: {
@@ -27,47 +28,21 @@ export const THEMES: ThemePreset[] = [
     },
   },
   {
-    id: "violet",
-    label: "ม่วง",
-    swatch: "oklch(0.60 0.22 295)",
-    tint: "oklch(0.93 0.05 295)",
+    id: "rose",
+    label: "Cake",
+    swatch: "oklch(0.7 0.16 8)",
+    tint: "oklch(0.93 0.05 10)",
     vars: {
-      background: "oklch(0.975 0.008 295)",
-      primary: "oklch(0.42 0.14 295)",
-      accent: "oklch(0.60 0.22 295)",
-      ring: "oklch(0.60 0.22 295)",
-      "chart-1": "oklch(0.60 0.22 295)",
-    },
-  },
-  {
-    id: "indigo",
-    label: "คราม",
-    swatch: "oklch(0.58 0.22 265)",
-    tint: "oklch(0.93 0.05 260)",
-    vars: {
-      background: "oklch(0.975 0.008 260)",
-      primary: "oklch(0.42 0.14 260)",
-      accent: "oklch(0.58 0.22 265)",
-      ring: "oklch(0.58 0.22 265)",
-      "chart-1": "oklch(0.58 0.22 265)",
-    },
-  },
-  {
-    id: "teal",
-    label: "เทอร์คอยซ์",
-    swatch: "oklch(0.58 0.18 195)",
-    tint: "oklch(0.93 0.05 195)",
-    vars: {
-      background: "oklch(0.975 0.010 195)",
-      primary: "oklch(0.42 0.12 195)",
-      accent: "oklch(0.58 0.18 195)",
-      ring: "oklch(0.58 0.18 195)",
-      "chart-1": "oklch(0.58 0.18 195)",
+      background: "oklch(0.978 0.012 12)",
+      primary: "oklch(0.47 0.13 12)",
+      accent: "oklch(0.7 0.16 8)",
+      ring: "oklch(0.7 0.16 8)",
+      "chart-1": "oklch(0.7 0.16 8)",
     },
   },
   {
     id: "forest",
-    label: "เขียว",
+    label: "Matcha",
     swatch: "oklch(0.56 0.18 145)",
     tint: "oklch(0.93 0.05 145)",
     vars: {
@@ -79,16 +54,42 @@ export const THEMES: ThemePreset[] = [
     },
   },
   {
-    id: "rose",
-    label: "กุหลาบ",
-    swatch: "oklch(0.62 0.22 10)",
-    tint: "oklch(0.93 0.05 10)",
+    id: "teal",
+    label: "Ocean",
+    swatch: "oklch(0.58 0.18 195)",
+    tint: "oklch(0.93 0.05 195)",
     vars: {
-      background: "oklch(0.975 0.010 10)",
-      primary: "oklch(0.45 0.14 10)",
-      accent: "oklch(0.62 0.22 10)",
-      ring: "oklch(0.62 0.22 10)",
-      "chart-1": "oklch(0.62 0.22 10)",
+      background: "oklch(0.975 0.010 195)",
+      primary: "oklch(0.42 0.12 195)",
+      accent: "oklch(0.58 0.18 195)",
+      ring: "oklch(0.58 0.18 195)",
+      "chart-1": "oklch(0.58 0.18 195)",
+    },
+  },
+  {
+    id: "indigo",
+    label: "Blueberry",
+    swatch: "oklch(0.58 0.22 265)",
+    tint: "oklch(0.93 0.05 260)",
+    vars: {
+      background: "oklch(0.975 0.008 260)",
+      primary: "oklch(0.42 0.14 260)",
+      accent: "oklch(0.58 0.22 265)",
+      ring: "oklch(0.58 0.22 265)",
+      "chart-1": "oklch(0.58 0.22 265)",
+    },
+  },
+  {
+    id: "violet",
+    label: "Grape",
+    swatch: "oklch(0.60 0.22 295)",
+    tint: "oklch(0.93 0.05 295)",
+    vars: {
+      background: "oklch(0.975 0.008 295)",
+      primary: "oklch(0.42 0.14 295)",
+      accent: "oklch(0.60 0.22 295)",
+      ring: "oklch(0.60 0.22 295)",
+      "chart-1": "oklch(0.60 0.22 295)",
     },
   },
 ]
