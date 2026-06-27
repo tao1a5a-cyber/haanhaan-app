@@ -6,7 +6,13 @@ import { ChevronLeft, Plus, Users, ArrowRight, X, UserPlus } from "lucide-react"
 import { MemberAvatar } from "./member-avatar"
 import { GroupAvatar } from "./group-avatar"
 import { CreatedByFooter } from "@/components/created-by-footer"
+import { useThemeMode } from "@/lib/theme"
 import type { Group, Member } from "./types"
+
+const LIGHT_BG =
+  "linear-gradient(168deg, oklch(0.98 0.012 85) 0%, oklch(0.96 0.03 60) 45%, oklch(0.95 0.04 30) 100%)"
+const DARK_BG =
+  "linear-gradient(168deg, oklch(0.2 0 0) 0%, oklch(0.17 0 0) 55%, oklch(0.15 0 0) 100%)"
 
 type Props = {
   groups: Group[]
@@ -18,6 +24,7 @@ type Props = {
 }
 
 export function EntryScreen({ groups, initialGroupId, onEnter, onCreateGroup, onAddMember }: Props) {
+  const [themeMode] = useThemeMode()
   const [step, setStep] = useState<"group" | "member">(initialGroupId ? "member" : "group")
   const [selectedId, setSelectedId] = useState<string | null>(initialGroupId ?? null)
   const [leaving, setLeaving] = useState<string | null>(null)
@@ -68,10 +75,7 @@ export function EntryScreen({ groups, initialGroupId, onEnter, onCreateGroup, on
   return (
     <main
       className="relative mx-auto flex min-h-screen w-full max-w-md flex-col overflow-hidden"
-      style={{
-        background:
-          "linear-gradient(168deg, oklch(0.98 0.012 85) 0%, oklch(0.96 0.03 60) 45%, oklch(0.95 0.04 30) 100%)",
-      }}
+      style={{ background: themeMode === "dark" ? DARK_BG : LIGHT_BG }}
     >
       {/* soft brand blobs */}
       <div
@@ -123,7 +127,7 @@ export function EntryScreen({ groups, initialGroupId, onEnter, onCreateGroup, on
                     onClick={() => openGroup(g)}
                     className="group flex w-full items-center gap-3 rounded-[1.4rem] bg-card p-3.5 text-left shadow-sm ring-1 ring-border transition active:scale-[0.99] hover:ring-accent/40"
                   >
-                    <GroupAvatar group={g} size={48} className="rounded-2xl" />
+                    <GroupAvatar group={g} size={48} />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-base font-semibold text-foreground">{g.name}</p>
                       <div className="mt-1 flex items-center gap-2">

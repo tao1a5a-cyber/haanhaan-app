@@ -55,6 +55,7 @@ import { signOut, getCurrentUser, onAuthChange } from "@/lib/auth"
 import { loadLastContext, saveLastContext, clearLastContext } from "@/lib/prefs"
 import { isGuestMode, exitLocalModes, GUEST_TX_LIMIT } from "@/lib/access-mode"
 import { guestSeedIfEmpty, guestTransactionCount } from "@/lib/guest-store"
+import { useThemeMode } from "@/lib/theme"
 
 const tabTitles: Record<string, string> = {
   summary: "สรุปค่าใช้จ่าย",
@@ -80,6 +81,7 @@ export default function Page() {
   // signed-in Supabase account (shared cookie session)
   const [authEmail, setAuthEmail] = useState<string | null>(null)
   const [authUserId, setAuthUserId] = useState<string | null>(null)
+  const [themeMode] = useThemeMode()
 
   // ── Auth gate: send unauthenticated visitors to /login ─────
   // Also drives the header's signed-in email indicator + identity binding.
@@ -491,13 +493,18 @@ export default function Page() {
 
   // ── Main app ────────────────────────────────────────────
   const theme = getTheme(member.themeId)
-  const themeStyle: React.CSSProperties = {
-    "--background": theme.vars.background,
-    "--primary": theme.vars.primary,
-    "--accent": theme.vars.accent,
-    "--ring": theme.vars.ring,
-    "--chart-1": theme.vars["chart-1"],
-  } as React.CSSProperties
+  // Per-member theme is a light-mode personalization; in dark mode we let the
+  // global .dark palette (clean black/gray) take over for a consistent look.
+  const themeStyle: React.CSSProperties | undefined =
+    themeMode === "dark"
+      ? undefined
+      : ({
+          "--background": theme.vars.background,
+          "--primary": theme.vars.primary,
+          "--accent": theme.vars.accent,
+          "--ring": theme.vars.ring,
+          "--chart-1": theme.vars["chart-1"],
+        } as React.CSSProperties)
 
   const myNotifications = notifications.filter((n) => n.recipientId === member.id)
 
