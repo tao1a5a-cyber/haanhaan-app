@@ -374,7 +374,7 @@ export default function Page() {
     )
   }
 
-  function handleSettingsSave(updated: Partial<Member>, pinHash?: string) {
+  function handleSettingsSave(updated: Partial<Member>, pinHash?: string | null) {
     if (!member) return
     setMember((prev) => (prev ? { ...prev, ...updated } : prev))
     applyMemberUpdate(member.id, updated)

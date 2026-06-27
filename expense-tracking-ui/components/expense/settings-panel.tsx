@@ -14,7 +14,7 @@ import type { Group, Member } from "./types"
 type Props = {
   group: Group
   member: Member
-  onSave: (updated: Partial<Member>, pinHash?: string) => void
+  onSave: (updated: Partial<Member>, pinHash?: string | null) => void
   onAddMember: (name: string) => void
   onRemoveMember: (id: string) => void
   onRenameGroup: (name: string) => void
@@ -171,6 +171,12 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
     } finally {
       setSavingPin(false)
     }
+  }
+
+  function handleRemovePin() {
+    if (!confirm("ต้องการลบรหัสผ่านของโปรไฟล์นี้ใช่ไหม? หลังจากนี้จะเข้าโปรไฟล์ได้โดยไม่ต้องใส่รหัส")) return
+    onSave({}, null)  // null clears pin_hash + pin_salt
+    setSection("main"); setPin(""); setConfirmPin(""); setPinError("")
   }
 
   function handleAddMember() {
@@ -464,6 +470,18 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                 {savingPin && <Loader2 className="size-4 animate-spin" />}
                 บันทึกรหัสผ่าน
               </button>
+              <button
+                type="button"
+                onClick={handleRemovePin}
+                disabled={savingPin}
+                className="flex w-full items-center justify-center gap-2 rounded-2xl py-3 text-sm font-medium text-destructive transition active:scale-[0.98] disabled:opacity-60"
+              >
+                <Trash2 className="size-4" />
+                ลบรหัสผ่าน
+              </button>
+              <p className="text-center text-[11px] leading-relaxed text-muted-foreground">
+                ลบรหัสผ่านเพื่อให้เข้าโปรไฟล์นี้ได้โดยไม่ต้องใส่รหัส
+              </p>
             </div>
           )}
       </div>

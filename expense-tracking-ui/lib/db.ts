@@ -212,7 +212,8 @@ export async function addMember(
 export async function updateMember(
   memberId: string,
   updated: Partial<Member>,
-  pinHash?: string,
+  // undefined = leave the PIN as-is; a string = set it; null = clear it.
+  pinHash?: string | null,
 ) {
   if (isGuestMode()) return guest.guestUpdateMember(memberId, updated)
   const db = tryGetSupabase()
@@ -224,7 +225,11 @@ export async function updateMember(
       ...(updated.tint !== undefined ? { tint: updated.tint } : {}),
       ...(updated.themeId !== undefined ? { theme_id: updated.themeId } : {}),
       ...(updated.avatar !== undefined ? { avatar_url: updated.avatar || null } : {}),
-      ...(pinHash !== undefined ? { pin_hash: pinHash, pin_salt: memberId } : {}),
+      ...(pinHash === null
+        ? { pin_hash: null, pin_salt: null }
+        : pinHash !== undefined
+          ? { pin_hash: pinHash, pin_salt: memberId }
+          : {}),
     })
     .eq("id", memberId)
   if (error) console.error("updateMember", error)
