@@ -26,7 +26,6 @@ import type { AppNotification } from "@/components/expense/notifications"
 import { isSupabaseConfigured, tryGetSupabase } from "@/lib/supabase"
 import {
   fetchGroups,
-  fetchGroupByRoomCode,
   ensureRoomCode,
   createGroup,
   renameGroup,
@@ -54,7 +53,7 @@ import { memberBalances, myNet } from "@/lib/balances"
 import { verifyPin } from "@/lib/pin"
 import { signOut, getCurrentUser, onAuthChange } from "@/lib/auth"
 import { loadLastContext, saveLastContext, clearLastContext } from "@/lib/prefs"
-import { isGuestMode, getRoomCode, exitLocalModes, GUEST_TX_LIMIT } from "@/lib/access-mode"
+import { isGuestMode, exitLocalModes, GUEST_TX_LIMIT } from "@/lib/access-mode"
 import { guestSeedIfEmpty, guestTransactionCount } from "@/lib/guest-store"
 
 const tabTitles: Record<string, string> = {
@@ -86,16 +85,17 @@ export default function Page() {
   // Also drives the header's signed-in email indicator + identity binding.
   useEffect(() => {
     if (!isSupabaseConfigured) return
-    // Guest (offline) and Room (code) visitors are intentionally not signed in —
-    // don't bounce them to /login.
-    if (isGuestMode() || getRoomCode()) return
+    // Offline Guest Mode is intentionally not signed in — don't bounce to /login.
+    if (isGuestMode()) return
+    // Anonymous (Room Code) sessions count as signed in, so `u` is truthy for
+    // them and they aren't redirected; only a true sign-out sends to /login.
     getCurrentUser().then((u) => {
-      setAuthEmail(u?.email ?? null)
+      setAuthEmail(u?.email || null)
       setAuthUserId(u?.id ?? null)
       if (!u) window.location.href = "/login"
     })
     return onAuthChange((u) => {
-      setAuthEmail(u?.email ?? null)
+      setAuthEmail(u?.email || null)
       setAuthUserId(u?.id ?? null)
       if (!u) window.location.href = "/login"
     })
@@ -104,22 +104,23 @@ export default function Page() {
   // ── Bootstrap: load groups, then pick where to land ─────
   useEffect(() => {
     async function boot() {
-      // A real signed-in account always wins over any local (guest/room) flag.
       const me = isSupabaseConfigured ? await getCurrentUser() : null
-      if (me) {
+
+      // 1) A real (non-anonymous) account always wins and clears any guest flag.
+      if (me && !me.isAnonymous) {
         exitLocalModes()
-        setAuthEmail(me.email ?? null)
-        setAuthUserId(me.id ?? null)
+        setAuthEmail(me.email || null)
+        setAuthUserId(me.id)
         const gs = await fetchGroups()
         setGroups(gs)
 
-        // 1) Email already bound to a member → enter that profile directly.
+        // Email already bound to a member → enter that profile directly.
         for (const g of gs) {
           const mine = g.members.find((m) => m.userId === me.id)
           if (mine) { setEntryGroupId(g.id); await enterAs(g, mine); setLoading(false); return }
         }
 
-        // 2) Otherwise restore the last group + member used on this device.
+        // Otherwise restore the last group + member used on this device.
         const last = loadLastContext()
         if (last) {
           const g = gs.find((x) => x.id === last.groupId)
@@ -130,7 +131,7 @@ export default function Page() {
         return
       }
 
-      // Guest mode — everything lives in localStorage; jump straight in.
+      // 2) Offline Guest Mode — everything lives in localStorage.
       if (isGuestMode()) {
         const gs = guestSeedIfEmpty()
         setGroups(gs)
@@ -142,26 +143,24 @@ export default function Page() {
         return
       }
 
-      // Room mode — load the single cloud group behind the entered Room Code.
-      const code = getRoomCode()
-      if (code) {
-        const g = await fetchGroupByRoomCode(code)
-        if (g) {
-          setGroups([g])
-          setEntryGroupId(g.id)
-          const last = loadLastContext()
-          const m = last?.groupId === g.id ? g.members.find((x) => x.id === last.memberId) : undefined
-          if (m) await enterAs(g, m)
-        } else {
-          // Code no longer valid → drop it and fall back to the login page.
-          exitLocalModes()
-          window.location.href = "/login"
-          return
+      // 3) Anonymous Room guest — RLS returns only the group(s) they redeemed a
+      //    code for. Let them pick a member; the anonymous session persists.
+      if (me) {
+        setAuthUserId(me.id)
+        const gs = await fetchGroups()
+        setGroups(gs)
+        if (gs.length > 0) setEntryGroupId(gs[0].id)
+        const last = loadLastContext()
+        if (last) {
+          const g = gs.find((x) => x.id === last.groupId)
+          const m = g?.members.find((x) => x.id === last.memberId)
+          if (g && m) { setEntryGroupId(g.id); await enterAs(g, m) }
         }
         setLoading(false)
         return
       }
 
+      // 4) Not signed in → the auth gate redirects to /login.
       setLoading(false)
     }
     boot()
@@ -191,7 +190,7 @@ export default function Page() {
 
   // ── Notifications: load inbox + live-subscribe ──────────
   useEffect(() => {
-    if (!member || !isSupabaseConfigured) return
+    if (!member || !isSupabaseConfigured || isGuestMode()) return
     let active = true
 
     fetchNotifications(member.id).then((rows) => { if (active) setNotifications(rows) })
@@ -310,9 +309,10 @@ export default function Page() {
 
   // ── Group / member entry ─────────────────────────────────
   async function handleCreateGroup(name: string): Promise<Group | null> {
-    const id = await createGroup(name)
-    if (!id) return null
-    const g: Group = { id, name, members: [] }
+    // Pass the host so the new group is owned by its creator (also stamped
+    // server-side by the set_group_host trigger under the strict RLS model).
+    const g = await createGroup(name, authUserId ?? undefined)
+    if (!g) return null
     setGroups((prev) => [...prev, g])
     return g
   }
@@ -579,7 +579,7 @@ export default function Page() {
             onRenameGroup={handleRenameGroup}
             onSaveGroupAvatar={handleSaveGroupAvatar}
             onGenerateRoomCode={handleGenerateRoomCode}
-            roomCodeEnabled={!isGuestMode() && !!authUserId}
+            roomCodeEnabled={!isGuestMode() && !!authEmail}
           />
         )}
       </div>

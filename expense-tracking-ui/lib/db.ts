@@ -120,22 +120,21 @@ function randomRoomCode(len = 6): string {
   return out
 }
 
-/** Look up a group by its Room Code, with members nested (null if not found). */
-export async function fetchGroupByRoomCode(code: string): Promise<Group | null> {
+/**
+ * Redeem a Room Code: grants the current (anonymous or real) auth user access
+ * to the matching group via the join_room() SECURITY DEFINER function and
+ * returns the group id. Null = unknown code or no session. This is the only
+ * path that works once the strict RLS in migration 0010 is applied — a direct
+ * `select … where room_code` is blocked before the grant exists.
+ */
+export async function joinRoom(code: string): Promise<string | null> {
   const db = tryGetSupabase()
   if (!db) return null
   const normalized = code.trim().toUpperCase()
   if (!normalized) return null
-  const { data: g, error } = await db.from("groups").select("*").eq("room_code", normalized).maybeSingle()
-  if (error) { console.error("fetchGroupByRoomCode", error); return null }
-  if (!g) return null
-  const { data: memberRows, error: mErr } = await db
-    .from("members")
-    .select("*")
-    .eq("group_id", (g as any).id)
-    .order("created_at", { ascending: true })
-  if (mErr) { console.error("fetchGroupByRoomCode members", mErr); return null }
-  return mapGroup(g, (memberRows ?? []).map(mapMember))
+  const { data, error } = await db.rpc("join_room", { p_code: normalized })
+  if (error) { console.error("joinRoom", error); return null }
+  return (data as string | null) ?? null
 }
 
 /**

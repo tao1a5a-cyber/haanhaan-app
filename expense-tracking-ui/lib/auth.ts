@@ -8,6 +8,8 @@ export type AuthUser = {
   name: string
   /** provider profile picture URL ("" if none) */
   avatar: string
+  /** true for a guest signed in anonymously to access a Room Code (no real account) */
+  isAnonymous: boolean
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -22,7 +24,23 @@ export function mapAuthUser(u: any): AuthUser | null {
     email: u.email ?? "",
     name: meta.full_name ?? meta.name ?? fallbackName,
     avatar: meta.avatar_url ?? meta.picture ?? "",
+    isAnonymous: Boolean(u.is_anonymous),
   }
+}
+
+/**
+ * Sign in anonymously (reusing any existing session) so a guest gets a real
+ * auth uid — required for the join_room() grant + membership RLS to apply.
+ * Returns the user id, or null if anonymous sign-in is disabled/unavailable.
+ */
+export async function ensureAnonymousSession(): Promise<string | null> {
+  const db = tryGetSupabase()
+  if (!db) return null
+  const { data: { user } } = await db.auth.getUser()
+  if (user) return user.id
+  const { data, error } = await db.auth.signInAnonymously()
+  if (error) { console.error("ensureAnonymousSession", error); return null }
+  return data.user?.id ?? null
 }
 
 /** Current session's user, or null. */

@@ -1,18 +1,15 @@
 /**
- * Access modes for visitors who are NOT signed in with a Supabase account.
+ * Guest Mode flag for visitors who are NOT signed in with any Supabase session.
  *
- *  - "guest" — fully offline. All data lives in localStorage (see guest-store).
- *    Capped at GUEST_TX_LIMIT transactions, after which we nudge to sign in.
- *  - "room"  — a shareable Room Code points at one cloud group. The visitor
- *    reads/writes that group through the normal Supabase anon client (RLS is
- *    permissive), without creating their own account.
+ * Guest Mode is fully offline: all data lives in localStorage (see guest-store),
+ * capped at GUEST_TX_LIMIT transactions, after which we nudge the user to sign in.
  *
- * A signed-in account always takes precedence; logging in (or out) clears both
- * flags via exitLocalModes().
+ * Room access is NOT a flag here — a guest who enters a Room Code is signed in
+ * anonymously (a real auth uid with a join_room grant), so the Supabase session
+ * itself carries that state. A real account always wins and clears this flag.
  */
 
 const GUEST_KEY = "haanhaan:guest"
-const ROOM_KEY = "haanhaan:room-code"
 
 /** Max transactions a guest may store locally before being asked to sign in. */
 export const GUEST_TX_LIMIT = 100
@@ -30,38 +27,16 @@ export function enterGuestMode() {
   if (typeof window === "undefined") return
   try {
     window.localStorage.setItem(GUEST_KEY, "1")
-    window.localStorage.removeItem(ROOM_KEY)
   } catch {
     /* storage disabled */
   }
 }
 
-/** The Room Code the visitor is currently browsing through (null = not in a room). */
-export function getRoomCode(): string | null {
-  if (typeof window === "undefined") return null
-  try {
-    return window.localStorage.getItem(ROOM_KEY)
-  } catch {
-    return null
-  }
-}
-
-export function enterRoomMode(code: string) {
-  if (typeof window === "undefined") return
-  try {
-    window.localStorage.setItem(ROOM_KEY, code.trim().toUpperCase())
-    window.localStorage.removeItem(GUEST_KEY)
-  } catch {
-    /* storage disabled */
-  }
-}
-
-/** Drop both guest + room flags — called whenever a real account is active. */
+/** Drop the guest flag — called whenever a real account is active. */
 export function exitLocalModes() {
   if (typeof window === "undefined") return
   try {
     window.localStorage.removeItem(GUEST_KEY)
-    window.localStorage.removeItem(ROOM_KEY)
   } catch {
     /* ignore */
   }

@@ -2,8 +2,9 @@
 
 import { useState } from "react"
 import { ArrowRight, KeyRound, Loader2 } from "lucide-react"
-import { fetchGroupByRoomCode } from "@/lib/db"
-import { enterGuestMode, enterRoomMode } from "@/lib/access-mode"
+import { joinRoom } from "@/lib/db"
+import { ensureAnonymousSession } from "@/lib/auth"
+import { enterGuestMode } from "@/lib/access-mode"
 
 /**
  * Login-page extras for visitors who don't want to sign in:
@@ -20,15 +21,24 @@ export function GuestAccess() {
     window.location.href = "/"
   }
 
-  async function joinRoom(e: React.FormEvent) {
+  async function handleJoinRoom(e: React.FormEvent) {
     e.preventDefault()
     const normalized = code.trim().toUpperCase()
     if (!normalized) return
     setLoading(true)
     setError("")
-    const group = await fetchGroupByRoomCode(normalized)
-    if (group) {
-      enterRoomMode(normalized)
+
+    // 1) Get a real (anonymous) session so the join_room grant + RLS apply.
+    const uid = await ensureAnonymousSession()
+    if (!uid) {
+      setError("เข้าห้องไม่สำเร็จ ลองใหม่อีกครั้ง")
+      setLoading(false)
+      return
+    }
+
+    // 2) Redeem the code → records access to that group, returns its id.
+    const groupId = await joinRoom(normalized)
+    if (groupId) {
       window.location.href = "/"
     } else {
       setError("ไม่พบห้องนี้ ตรวจสอบรหัสอีกครั้ง")
@@ -56,7 +66,7 @@ export function GuestAccess() {
         <span className="h-px flex-1 bg-border" />
       </div>
 
-      <form onSubmit={joinRoom} className="flex flex-col gap-2.5">
+      <form onSubmit={handleJoinRoom} className="flex flex-col gap-2.5">
         <div className="flex items-center gap-2 rounded-2xl border bg-background px-3 py-2.5 ring-1 ring-transparent transition focus-within:ring-accent/40">
           <KeyRound className="size-4 shrink-0 text-muted-foreground" />
           <input
