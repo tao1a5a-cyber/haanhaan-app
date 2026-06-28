@@ -661,9 +661,6 @@ export default function Page() {
           />
           <div className="pointer-events-none fixed inset-x-0 bottom-28 z-40 mx-auto flex w-full max-w-md justify-center px-3">
             <div className="pointer-events-auto relative w-full origin-bottom animate-in zoom-in-95 fade-in duration-200">
-              {/* Chat-style tail: a rotated square behind the card, poking out the
-                  bottom-center to point down at the Goose for a connected feel. */}
-              <div className="absolute bottom-0 left-1/2 z-0 size-5 -translate-x-1/2 translate-y-1/2 rotate-45 rounded-[5px] bg-background ring-1 ring-border" />
               <div className="relative z-10 flex max-h-[64vh] w-full flex-col overflow-hidden rounded-[1.8rem] bg-background shadow-2xl ring-1 ring-border">
                 <div className="flex shrink-0 items-center justify-end px-3 pt-3">
                   <button
@@ -686,6 +683,10 @@ export default function Page() {
                   />
                 </div>
               </div>
+              {/* Chat-style tail: a solid triangle the same colour as the card,
+                  no outline, overlapping the bottom edge so it merges seamlessly
+                  and points down at the Goose. */}
+              <div className="absolute left-1/2 top-full z-20 h-0 w-0 -translate-x-1/2 -translate-y-px border-x-[11px] border-t-[12px] border-x-transparent border-t-background" />
             </div>
           </div>
         </>
