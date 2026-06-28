@@ -304,7 +304,7 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                       <button
                         key={theme.id}
                         type="button"
-                        onClick={() => setThemeId(theme.id)}
+                        onClick={() => { setThemeId(theme.id); onSave({ themeId: theme.id, tint: theme.tint }) }}
                         aria-label={theme.label}
                         className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-xs font-medium transition active:scale-95 ${themeId === theme.id ? "shadow-sm" : "bg-secondary text-muted-foreground"}`}
                         style={themeId === theme.id ? { backgroundColor: theme.vars.accent, color: "white" } : undefined}
@@ -616,7 +616,7 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
         <AvatarWheel
           valueSrc={avatar}
           tint={activeTheme.tint}
-          onConfirm={(src) => { setAvatar(src); setAvatarBlob(null) }}
+          onConfirm={(src) => { setAvatar(src); setAvatarBlob(null); onSave({ avatar: src }) }}
           onClose={() => setShowAvatarWheel(false)}
         />
       )}

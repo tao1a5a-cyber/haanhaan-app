@@ -657,27 +657,31 @@ export default function Page() {
             className="fixed inset-0 z-30 bg-foreground/40 backdrop-blur-sm animate-in fade-in duration-200"
           />
           <div className="pointer-events-none fixed inset-x-0 bottom-28 z-40 mx-auto flex w-full max-w-md justify-center px-3">
-            <div className="pointer-events-auto flex max-h-[64vh] w-full origin-bottom animate-in zoom-in-95 fade-in flex-col overflow-hidden rounded-[1.8rem] bg-background shadow-2xl ring-1 ring-border duration-200">
-              <div className="flex shrink-0 items-center justify-between border-b border-border bg-background/90 px-5 py-3 backdrop-blur-sm">
-                <h2 className="text-base font-semibold text-foreground">เพิ่มรายการ</h2>
-                <button
-                  type="button"
-                  onClick={() => setShowAddForm(false)}
-                  aria-label="ปิด"
-                  className="grid size-8 place-items-center rounded-full bg-secondary text-muted-foreground transition active:scale-90"
-                >
-                  <X className="size-4" />
-                </button>
-              </div>
-              <div className="overflow-y-auto">
-                <AddTransaction
-                  categories={allCategories}
-                  members={group.members}
-                  currentMember={member}
-                  onAdd={handleAdd}
-                  onAddCategory={handleAddCategory}
-                  onSubmitted={() => setShowAddForm(false)}
-                />
+            <div className="pointer-events-auto relative w-full origin-bottom animate-in zoom-in-95 fade-in duration-200">
+              {/* Chat-style tail: a rotated square behind the card, poking out the
+                  bottom-center to point down at the Goose for a connected feel. */}
+              <div className="absolute bottom-0 left-1/2 z-0 size-5 -translate-x-1/2 translate-y-1/2 rotate-45 rounded-[5px] bg-background ring-1 ring-border" />
+              <div className="relative z-10 flex max-h-[64vh] w-full flex-col overflow-hidden rounded-[1.8rem] bg-background shadow-2xl ring-1 ring-border">
+                <div className="flex shrink-0 items-center justify-end px-3 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddForm(false)}
+                    aria-label="ปิด"
+                    className="grid size-8 place-items-center rounded-full bg-secondary text-muted-foreground transition active:scale-90"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
+                <div className="overflow-y-auto">
+                  <AddTransaction
+                    categories={allCategories}
+                    members={group.members}
+                    currentMember={member}
+                    onAdd={handleAdd}
+                    onAddCategory={handleAddCategory}
+                    onSubmitted={() => setShowAddForm(false)}
+                  />
+                </div>
               </div>
             </div>
           </div>
