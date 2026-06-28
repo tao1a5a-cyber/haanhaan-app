@@ -256,7 +256,7 @@ export function HistoryView({
                     return (
                       <li
                         key={t.id}
-                        className={`rounded-2xl bg-card ring-1 ring-border ${t.settled ? "opacity-50" : ""}`}
+                        className={`overflow-hidden rounded-2xl bg-card ring-1 ring-border ${t.settled ? "opacity-50" : ""}`}
                       >
                         <div className="flex items-center gap-3 p-3.5">
                           <span className={`grid size-11 shrink-0 place-items-center rounded-xl ${cat.tint}`}>
@@ -270,7 +270,7 @@ export function HistoryView({
                             </p>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
-                            <p className="text-sm font-bold tabular-nums text-foreground mr-1">
+                            <p className="mr-1 text-sm font-bold tabular-nums text-foreground">
                               ฿{formatBaht(t.amount)}
                             </p>
                             <button

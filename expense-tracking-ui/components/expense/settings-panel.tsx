@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, useState } from "react"
-import { X, Eye, EyeOff, Camera, Loader2, UserCog, Users, Palette, Lock, Trash2, UserPlus, Check, ImagePlus, KeyRound, Copy, Sun, Moon, ChevronDown } from "lucide-react"
+import { X, Eye, EyeOff, Camera, Loader2, UserCog, Users, Palette, Lock, Trash2, UserPlus, Check, ImagePlus, KeyRound, Copy, Sun, Moon, ChevronDown, Mail } from "lucide-react"
 import { useThemeMode } from "@/lib/theme"
 import { isCustomAvatar } from "./users"
 import { MemberAvatar } from "./member-avatar"
@@ -32,12 +32,18 @@ type Props = {
   onGenerateRoomCode?: () => Promise<string | null>
   /** whether the Room Code feature is available (signed-in, non-guest) */
   roomCodeEnabled?: boolean
+  /** delete the whole group (host only) */
+  onDeleteGroup?: () => void
+  /** whether the current user may delete the group (host / guest-mode owner) */
+  canDeleteGroup?: boolean
+  /** whether the current user is the Host (only the Host may remove members) */
+  isHost?: boolean
   /** when true, render inline as a tab page instead of a floating modal */
   embedded?: boolean
   onClose?: () => void
 }
 
-export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMember, onRenameGroup, onSaveGroupAvatar, authEmail, authUserId, onClaimMember, onGenerateRoomCode, roomCodeEnabled, embedded, onClose }: Props) {
+export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMember, onRenameGroup, onSaveGroupAvatar, authEmail, authUserId, onClaimMember, onGenerateRoomCode, roomCodeEnabled, onDeleteGroup, canDeleteGroup = false, isHost = false, embedded, onClose }: Props) {
   const [name, setName] = useState(member.name)
   const [avatar, setAvatar] = useState(member.avatar)
   const [avatarBlob, setAvatarBlob] = useState<Blob | null>(null)
@@ -62,6 +68,10 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
 
   const [groupName, setGroupName] = useState(group.name)
   const [newMember, setNewMember] = useState("")
+
+  // Delete-group confirmation (type the group name to confirm).
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState("")
 
   const [themeMode, toggleTheme] = useThemeMode()
 
@@ -250,7 +260,7 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                       onChange={(e) => setName(e.target.value)}
                       maxLength={20}
                       placeholder="ชื่อของคุณ"
-                      className="w-full rounded-xl bg-secondary px-3 py-2.5 text-sm font-medium text-foreground outline-none ring-1 ring-transparent transition placeholder:text-muted-foreground focus:ring-accent"
+                      className="w-full rounded-xl bg-secondary px-3 py-2.5 text-sm font-medium text-foreground shadow-[inset_0_1px_2px_rgba(0,0,0,0.22)] outline-none ring-1 ring-transparent transition placeholder:text-muted-foreground focus:ring-accent"
                     />
                     <button type="button" onClick={() => avatarInputRef.current?.click()} className="mt-1 text-xs text-accent underline underline-offset-2">
                       เปลี่ยนรูป (ครอปวงกลมอัตโนมัติ)
@@ -266,7 +276,7 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                   className="mt-3 flex w-full items-center justify-between rounded-xl bg-secondary px-4 py-3 text-sm font-medium text-foreground transition active:scale-[0.98]"
                 >
                   <span className="flex items-center gap-2">
-                    <UserCog className="size-4 text-muted-foreground" /> โปรไฟล์
+                    <UserCog className="size-4 text-accent" /> โปรไฟล์
                   </span>
                   <span className="flex items-center gap-2">
                     <span className="text-xs text-muted-foreground">{avatarLabel(avatar) ?? "เลือกห่าน"}</span>
@@ -282,7 +292,7 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                   className="mt-4 flex w-full items-center justify-between rounded-xl bg-secondary px-4 py-3 text-sm font-medium text-foreground transition active:scale-[0.98]"
                 >
                   <span className="flex items-center gap-2">
-                    <Palette className="size-4 text-muted-foreground" /> สีธีม
+                    <Palette className="size-4 text-accent" /> สีธีม
                   </span>
                   <span className="flex items-center gap-2">
                     <span className="size-4 shrink-0 rounded-full border border-border shadow-sm" style={{ backgroundColor: activeTheme.swatch }} />
@@ -296,7 +306,7 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                       <button
                         key={theme.id}
                         type="button"
-                        onClick={() => setThemeId(theme.id)}
+                        onClick={() => { setThemeId(theme.id); onSave({ themeId: theme.id, tint: theme.tint }) }}
                         aria-label={theme.label}
                         className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-xs font-medium transition active:scale-95 ${themeId === theme.id ? "shadow-sm" : "bg-secondary text-muted-foreground"}`}
                         style={themeId === theme.id ? { backgroundColor: theme.vars.accent, color: "white" } : undefined}
@@ -310,7 +320,7 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
 
                 {/* PIN */}
                 <button type="button" onClick={() => setSection("pin")} className="mt-4 flex w-full items-center justify-between rounded-xl bg-secondary px-4 py-3 text-sm font-medium text-foreground transition active:scale-[0.98]">
-                  <span className="flex items-center gap-2"><Lock className="size-4 text-muted-foreground" /> ตั้ง / เปลี่ยนรหัสผ่าน</span>
+                  <span className="flex items-center gap-2"><Lock className="size-4 text-accent" /> ตั้ง / เปลี่ยนรหัสผ่าน</span>
                   <span className="text-xs text-muted-foreground">→</span>
                 </button>
               </SectionCard>
@@ -325,14 +335,21 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                   className="flex w-full items-center justify-between rounded-xl bg-secondary px-4 py-3 text-sm font-medium text-foreground transition active:scale-[0.98]"
                 >
                   <span className="flex items-center gap-2">
-                    {themeMode === "dark" ? <Moon className="size-4 text-muted-foreground" /> : <Sun className="size-4 text-muted-foreground" />}
+                    {themeMode === "dark" ? <Moon className="size-4 text-accent" /> : <Sun className="size-4 text-accent" />}
                     โหมดมืด
                   </span>
+                  {/* Premium toggle: dark slate track + muted-gold thumb when on */}
                   <span
-                    className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${themeMode === "dark" ? "bg-accent" : "bg-border"}`}
+                    className={`relative h-7 w-12 shrink-0 rounded-full ring-1 transition-colors ${
+                      themeMode === "dark"
+                        ? "bg-secondary ring-accent/40 shadow-[inset_0_1px_3px_rgba(0,0,0,0.4)]"
+                        : "bg-border ring-transparent"
+                    }`}
                   >
                     <span
-                      className={`absolute top-0.5 size-5 rounded-full bg-card shadow-sm transition-all ${themeMode === "dark" ? "left-[1.375rem]" : "left-0.5"}`}
+                      className={`absolute top-1 size-5 rounded-full shadow-md transition-all ${
+                        themeMode === "dark" ? "left-6 bg-accent" : "left-1 bg-card"
+                      }`}
                     />
                   </span>
                 </button>
@@ -385,7 +402,7 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                   value={groupName}
                   onChange={(e) => setGroupName(e.target.value)}
                   maxLength={30}
-                  className="mt-1.5 w-full rounded-xl bg-secondary px-3 py-2.5 text-sm font-medium text-foreground outline-none ring-1 ring-transparent transition focus:ring-accent"
+                  className="mt-1.5 w-full rounded-xl bg-secondary px-3 py-2.5 text-sm font-medium text-foreground shadow-[inset_0_1px_2px_rgba(0,0,0,0.22)] outline-none ring-1 ring-transparent transition focus:ring-accent"
                 />
 
                 <p className="mb-2 mt-4 text-xs font-semibold text-muted-foreground">สมาชิก ({group.members.length})</p>
@@ -411,12 +428,13 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                         <button
                           type="button"
                           onClick={() => onClaimMember(m.id)}
-                          className="shrink-0 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground transition active:scale-95"
+                          className="flex shrink-0 items-center gap-1 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground transition active:scale-95"
                         >
-                          นี่คือฉัน
+                          <Mail className="size-3" />
+                          ผูกอีเมล
                         </button>
                       )}
-                      {m.id !== member.id && (
+                      {isHost && m.id !== member.id && (
                         <button
                           type="button"
                           onClick={() => onRemoveMember(m.id)}
@@ -432,25 +450,73 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                 </ul>
 
                 <div className="mt-3 flex items-center gap-2">
-                  <div className="flex flex-1 items-center gap-2 rounded-xl bg-secondary px-3 py-2 ring-1 ring-transparent focus-within:ring-accent">
-                    <UserPlus className="size-4 text-muted-foreground" />
-                    <input
-                      value={newMember}
-                      onChange={(e) => setNewMember(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") handleAddMember() }}
-                      placeholder="เพิ่มสมาชิกใหม่"
-                      className="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
-                    />
+                    <div className="flex flex-1 items-center gap-2 rounded-xl bg-secondary px-3 py-2 shadow-[inset_0_1px_2px_rgba(0,0,0,0.22)] ring-1 ring-transparent focus-within:ring-accent">
+                      <UserPlus className="size-4 text-accent" />
+                      <input
+                        value={newMember}
+                        onChange={(e) => setNewMember(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === "Enter") handleAddMember() }}
+                        placeholder="เพิ่มสมาชิกใหม่"
+                        className="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAddMember}
+                      disabled={!newMember.trim()}
+                      className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent text-accent-foreground shadow-sm transition active:scale-95 disabled:opacity-40"
+                    >
+                      <Check className="size-4" />
+                    </button>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleAddMember}
-                    disabled={!newMember.trim()}
-                    className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent text-accent-foreground shadow-sm transition active:scale-95 disabled:opacity-40"
-                  >
-                    <Check className="size-4" />
-                  </button>
-                </div>
+
+                {/* Danger zone — delete the whole group (host only) */}
+                {canDeleteGroup && (
+                  <div className="mt-5 border-t border-border pt-4">
+                    {!confirmingDelete ? (
+                      <button
+                        type="button"
+                        onClick={() => { setConfirmingDelete(true); setDeleteConfirm("") }}
+                        className="flex w-full items-center justify-center gap-2 rounded-xl bg-destructive/10 py-3 text-sm font-semibold text-destructive transition active:scale-[0.98]"
+                      >
+                        <Trash2 className="size-4" />
+                        ลบกลุ่มนี้
+                      </button>
+                    ) : (
+                      <div className="rounded-xl bg-destructive/8 p-3 ring-1 ring-destructive/30">
+                        <p className="text-xs leading-relaxed text-foreground">
+                          การลบจะลบ <span className="font-semibold">กลุ่ม สมาชิก และรายการทั้งหมด</span> อย่างถาวร กู้คืนไม่ได้
+                        </p>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          พิมพ์ชื่อกลุ่ม “<span className="font-semibold text-foreground">{group.name}</span>” เพื่อยืนยัน
+                        </p>
+                        <input
+                          value={deleteConfirm}
+                          onChange={(e) => setDeleteConfirm(e.target.value)}
+                          placeholder={group.name}
+                          className="mt-2 w-full rounded-lg bg-secondary px-3 py-2 text-sm text-foreground shadow-[inset_0_1px_2px_rgba(0,0,0,0.22)] outline-none ring-1 ring-transparent transition placeholder:text-muted-foreground focus:ring-destructive"
+                        />
+                        <div className="mt-3 flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => { setConfirmingDelete(false); setDeleteConfirm("") }}
+                            className="flex-1 rounded-lg bg-secondary py-2.5 text-sm font-semibold text-foreground ring-1 ring-border transition active:scale-[0.98]"
+                          >
+                            ยกเลิก
+                          </button>
+                          <button
+                            type="button"
+                            disabled={deleteConfirm.trim() !== group.name}
+                            onClick={() => onDeleteGroup?.()}
+                            className="flex-1 rounded-lg bg-destructive py-2.5 text-sm font-semibold text-destructive-foreground transition active:scale-[0.98] disabled:opacity-40"
+                          >
+                            ลบถาวร
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </SectionCard>
 
               {/* ── Room Code section (share this group with guests) ── */}
@@ -552,7 +618,7 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
         <AvatarWheel
           valueSrc={avatar}
           tint={activeTheme.tint}
-          onConfirm={(src) => { setAvatar(src); setAvatarBlob(null) }}
+          onConfirm={(src) => { setAvatar(src); setAvatarBlob(null); onSave({ avatar: src }) }}
           onClose={() => setShowAvatarWheel(false)}
         />
       )}
@@ -579,7 +645,7 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
 
 function SectionCard({ icon, title, accent, children }: { icon: React.ReactNode; title: string; accent: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-[1.4rem] bg-card p-4 shadow-sm ring-1 ring-border">
+    <section className="overflow-hidden rounded-[1.4rem] bg-card p-4 shadow-sm ring-1 ring-border">
       <div className="mb-3 flex items-center gap-2">
         <span className="grid size-7 place-items-center rounded-lg text-white" style={{ backgroundColor: accent }}>{icon}</span>
         <h3 className="text-sm font-semibold text-foreground">{title}</h3>

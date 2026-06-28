@@ -160,12 +160,29 @@ export async function createGroup(name: string, hostUserId?: string): Promise<Gr
   if (isGuestMode()) return guest.guestCreateGroup(name)
   const db = tryGetSupabase()
   if (!db) return null
+
+  // Resolve the host from the LIVE session, not just the passed value. On a
+  // brand-new login the caller's React state may still hold a null uid, and the
+  // strict RLS insert policy (groups_insert_own) rejects a row whose
+  // host_user_id !== auth.uid(). Reading the session here guarantees the stamp
+  // is correct so the creator can immediately see the group they just made.
+  let host = hostUserId ?? null
+  if (!host) {
+    const { data: { user } } = await db.auth.getUser()
+    host = user?.id ?? null
+  }
+  // No session at all → fail loudly so the UI can tell the user to sign in
+  // (rather than silently inserting a host-less row that RLS then hides).
+  if (!host) throw new Error("ยังไม่ได้เข้าสู่ระบบ (ไม่พบบัญชีผู้ใช้) — กรุณาเข้าสู่ระบบใหม่")
+
   const { data, error } = await db
     .from("groups")
-    .insert({ name, host_user_id: hostUserId ?? null })
+    .insert({ name, host_user_id: host })
     .select("*")
     .single()
-  if (error) { console.error("createGroup", error); return null }
+  // Re-throw the DB error so the caller can surface its message (RLS, missing
+  // column, etc.) instead of a silent null.
+  if (error) { console.error("createGroup", error); throw error }
   return mapGroup(data, [])
 }
 
@@ -175,6 +192,15 @@ export async function renameGroup(groupId: string, name: string) {
   if (!db) return
   const { error } = await db.from("groups").update({ name }).eq("id", groupId)
   if (error) console.error("renameGroup", error)
+}
+
+/** Delete a group (members/transactions cascade). RLS: host only. */
+export async function deleteGroup(groupId: string) {
+  if (isGuestMode()) return guest.guestDeleteGroup(groupId)
+  const db = tryGetSupabase()
+  if (!db) return
+  const { error } = await db.from("groups").delete().eq("id", groupId)
+  if (error) console.error("deleteGroup", error)
 }
 
 /** Set (or clear with "") the group's avatar image URL. */

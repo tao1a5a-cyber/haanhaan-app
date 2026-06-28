@@ -73,6 +73,10 @@ export function guestRenameGroup(groupId: string, name: string) {
   saveGroups(guestFetchGroups().map((g) => (g.id === groupId ? { ...g, name } : g)))
 }
 
+export function guestDeleteGroup(groupId: string) {
+  saveGroups(guestFetchGroups().filter((g) => g.id !== groupId))
+}
+
 export function guestUpdateGroupAvatar(groupId: string, avatarUrl: string) {
   saveGroups(guestFetchGroups().map((g) => (g.id === groupId ? { ...g, avatar: avatarUrl } : g)))
 }

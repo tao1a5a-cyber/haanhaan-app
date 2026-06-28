@@ -29,6 +29,7 @@ import {
   ensureRoomCode,
   createGroup,
   renameGroup,
+  deleteGroup,
   updateGroupAvatar,
   addMember,
   updateMember,
@@ -81,6 +82,11 @@ export default function Page() {
   // signed-in Supabase account (shared cookie session)
   const [authEmail, setAuthEmail] = useState<string | null>(null)
   const [authUserId, setAuthUserId] = useState<string | null>(null)
+  // true for an anonymous (Room Code) session — these guests are read-only until
+  // they sign in with a real account and claim a profile.
+  const [authIsAnonymous, setAuthIsAnonymous] = useState(false)
+  // when re-entering after a fresh join, start EntryScreen on a specific step
+  const [entryStep, setEntryStep] = useState<"group" | "member" | "profile" | null>(null)
   const [themeMode] = useThemeMode()
 
   // ── Auth gate: send unauthenticated visitors to /login ─────
@@ -94,11 +100,13 @@ export default function Page() {
     getCurrentUser().then((u) => {
       setAuthEmail(u?.email || null)
       setAuthUserId(u?.id ?? null)
+      setAuthIsAnonymous(!!u?.isAnonymous)
       if (!u) window.location.href = "/login"
     })
     return onAuthChange((u) => {
       setAuthEmail(u?.email || null)
       setAuthUserId(u?.id ?? null)
+      setAuthIsAnonymous(!!u?.isAnonymous)
       if (!u) window.location.href = "/login"
     })
   }, [])
@@ -113,6 +121,7 @@ export default function Page() {
         exitLocalModes()
         setAuthEmail(me.email || null)
         setAuthUserId(me.id)
+        setAuthIsAnonymous(false)
         const gs = await fetchGroups()
         setGroups(gs)
 
@@ -146,18 +155,21 @@ export default function Page() {
       }
 
       // 3) Anonymous Room guest — RLS returns only the group(s) they redeemed a
-      //    code for. Let them pick a member; the anonymous session persists.
+      //    code for. Read-only: they land on the profile step (sign-in prompt),
+      //    or resume the member they were last viewing as.
       if (me) {
         setAuthUserId(me.id)
+        setAuthIsAnonymous(true)
         const gs = await fetchGroups()
         setGroups(gs)
-        if (gs.length > 0) setEntryGroupId(gs[0].id)
         const last = loadLastContext()
         if (last) {
           const g = gs.find((x) => x.id === last.groupId)
           const m = g?.members.find((x) => x.id === last.memberId)
-          if (g && m) { setEntryGroupId(g.id); await enterAs(g, m) }
+          if (g && m) { setEntryGroupId(g.id); await enterAs(g, m); setLoading(false); return }
         }
+        // Freshly joined via a Room Code → show the profile / read-only screen.
+        if (gs.length > 0) { setEntryGroupId(gs[0].id); setEntryStep("profile") }
         setLoading(false)
         return
       }
@@ -313,10 +325,22 @@ export default function Page() {
   async function handleCreateGroup(name: string): Promise<Group | null> {
     // Pass the host so the new group is owned by its creator (also stamped
     // server-side by the set_group_host trigger under the strict RLS model).
-    const g = await createGroup(name, authUserId ?? undefined)
-    if (!g) return null
-    setGroups((prev) => [...prev, g])
-    return g
+    try {
+      const g = await createGroup(name, authUserId ?? undefined)
+      if (!g) {
+        alert("สร้างกลุ่มไม่สำเร็จ กรุณาลองใหม่อีกครั้ง")
+        return null
+      }
+      setGroups((prev) => [...prev, g])
+      return g
+    } catch (e) {
+      // Surface the real DB/RLS message so failures are diagnosable.
+      const err = e as { message?: string; code?: string; details?: string }
+      const detail = err?.message || err?.details || "unknown error"
+      alert(`สร้างกลุ่มไม่สำเร็จ\n${detail}${err?.code ? `\n(code: ${err.code})` : ""}`)
+      console.error("handleCreateGroup", e)
+      return null
+    }
   }
 
   async function handleAddMember(
@@ -328,12 +352,16 @@ export default function Page() {
     const m = await addMember(groupId, { name: draft.name, avatar: draft.avatar, ...defaults })
     if (!m) return null
     setGroups((prev) => prev.map((x) => (x.id === groupId ? { ...x, members: [...x.members, m] } : x)))
+    // Also update the active group so Settings (which reads `group`) shows the
+    // new member instantly without a refresh.
+    setGroup((prev) => (prev && prev.id === groupId ? { ...prev, members: [...prev.members, m] } : prev))
     return m
   }
 
   /** Remember "this email = this member" so next login enters directly. */
   function bindMemberToMe(m: Member) {
-    if (!authUserId || m.userId) return // unauthenticated or already bound
+    // Anonymous room guests can't claim (writes are blocked) — skip silently.
+    if (!authUserId || authIsAnonymous || m.userId) return // unauthenticated/guest or already bound
     claimMember(m.id, authUserId)
     applyMemberUpdate(m.id, { userId: authUserId })
   }
@@ -390,6 +418,8 @@ export default function Page() {
 
   function handleRemoveMember(memberId: string) {
     if (!group) return
+    // Only the Host may remove members from the house.
+    if (!isGuestMode() && !(authUserId && group.hostUserId === authUserId)) return
     setGroups((prev) =>
       prev.map((g) => (g.id === group.id ? { ...g, members: g.members.filter((m) => m.id !== memberId) } : g)),
     )
@@ -402,6 +432,23 @@ export default function Page() {
     setGroups((prev) => prev.map((g) => (g.id === group.id ? { ...g, name } : g)))
     setGroup((prev) => (prev ? { ...prev, name } : prev))
     renameGroup(group.id, name)
+  }
+
+  /** Delete the active group (host only). Cascades members + transactions. */
+  function handleDeleteGroup() {
+    if (!group) return
+    // Guard: only the host may delete (also enforced by RLS groups_delete_host).
+    if (!isGuestMode() && !(authUserId && group.hostUserId === authUserId)) return
+    const gid = group.id
+    deleteGroup(gid)
+    setGroups((prev) => prev.filter((g) => g.id !== gid))
+    clearLastContext()
+    // Drop back to the group picker.
+    setMember(null)
+    setGroup(null)
+    setEntryGroupId(null)
+    setEntryStep(null)
+    setTab("home")
   }
 
   /** Settings: mint (or reveal) the active group's shareable Room Code. */
@@ -484,9 +531,14 @@ export default function Page() {
       <EntryScreen
         groups={groups}
         initialGroupId={entryGroupId}
+        initialStep={entryStep}
+        authEmail={authEmail}
+        authUserId={authUserId}
         onEnter={enterAs}
         onCreateGroup={handleCreateGroup}
         onAddMember={handleAddMember}
+        onCreateProfile={handleAddMember}
+        onLogout={handleLogout}
       />
     )
   }
@@ -588,44 +640,56 @@ export default function Page() {
             onSaveGroupAvatar={handleSaveGroupAvatar}
             onGenerateRoomCode={handleGenerateRoomCode}
             roomCodeEnabled={!isGuestMode() && !!authEmail}
+            onDeleteGroup={handleDeleteGroup}
+            canDeleteGroup={isGuestMode() || (!!authUserId && group.hostUserId === authUserId)}
+            isHost={isGuestMode() || (!!authUserId && group.hostUserId === authUserId)}
           />
         )}
       </div>
 
-      <BottomNav active={tab} onChange={setTab} onAdd={() => setShowAddForm(true)} />
+      <BottomNav active={tab} onChange={setTab} addOpen={showAddForm} onAdd={() => setShowAddForm((v) => !v)} />
 
-      {/* One-click add: the FAB opens the expense form directly */}
+      {/* Quick-add: a floating popup that scales up out of the Goose FAB.
+          The bottom nav (z-50) + Goose stay visible above the dimmed backdrop. */}
       {showAddForm && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+        <>
           <button
             type="button"
             aria-label="ปิด"
             onClick={() => setShowAddForm(false)}
-            className="absolute inset-0 bg-foreground/30 backdrop-blur-sm"
+            className="fixed inset-0 z-20 bg-foreground/40 backdrop-blur-sm animate-in fade-in duration-200"
           />
-          <div className="relative max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-[2rem] bg-background pb-4 shadow-2xl ring-1 ring-border animate-in slide-in-from-bottom-4 fade-in duration-300 sm:rounded-[2rem]">
-            <div className="sticky top-0 z-10 flex items-center justify-between bg-background/90 px-5 pb-2 pt-4 backdrop-blur-sm">
-              <div className="absolute left-1/2 top-1.5 h-1.5 w-10 -translate-x-1/2 rounded-full bg-border sm:hidden" />
-              <h2 className="text-base font-semibold text-foreground">เพิ่มรายการ</h2>
-              <button
-                type="button"
-                onClick={() => setShowAddForm(false)}
-                aria-label="ปิด"
-                className="grid size-8 place-items-center rounded-full bg-secondary text-muted-foreground transition active:scale-90"
-              >
-                <X className="size-4" />
-              </button>
+          <div className="pointer-events-none fixed inset-x-0 bottom-28 z-30 mx-auto flex w-full max-w-md justify-center px-3">
+            <div className="pointer-events-auto relative w-full origin-bottom animate-in zoom-in-95 fade-in duration-200">
+              <div className="relative z-10 flex max-h-[64vh] w-full flex-col overflow-hidden rounded-[1.8rem] bg-background shadow-2xl ring-1 ring-border">
+                <div className="flex shrink-0 items-center justify-end px-3 pt-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddForm(false)}
+                    aria-label="ปิด"
+                    className="grid size-8 place-items-center rounded-full bg-secondary text-muted-foreground transition active:scale-90"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
+                <div className="overflow-y-auto">
+                  <AddTransaction
+                    categories={allCategories}
+                    members={group.members}
+                    currentMember={member}
+                    onAdd={handleAdd}
+                    onAddCategory={handleAddCategory}
+                    onSubmitted={() => setShowAddForm(false)}
+                  />
+                </div>
+              </div>
+              {/* Chat-style tail: a solid triangle the same colour as the card,
+                  no outline, overlapping the bottom edge so it merges seamlessly
+                  and points down at the Goose. */}
+              <div className="absolute left-1/2 top-full z-20 h-0 w-0 -translate-x-1/2 -translate-y-px border-x-[11px] border-t-[12px] border-x-transparent border-t-background" />
             </div>
-            <AddTransaction
-              categories={allCategories}
-              members={group.members}
-              currentMember={member}
-              onAdd={handleAdd}
-              onAddCategory={handleAddCategory}
-              onSubmitted={() => setShowAddForm(false)}
-            />
           </div>
-        </div>
+        </>
       )}
 
       {showSettlement && (
