@@ -89,8 +89,8 @@ export function EntryScreen({ groups, initialGroupId, onEnter, onCreateGroup, on
 
       {/* ── Brand zone ── */}
       <div className="relative flex flex-col items-center px-6 pt-14 pb-6">
-        <div className="overflow-hidden rounded-[1.75rem] bg-white/70 p-2 shadow-[0_18px_44px_-16px_oklch(0.45_0.08_40/0.5)] ring-1 ring-white/60 backdrop-blur-sm">
-          <Image src="/logo.png" alt="HaanHaan" width={104} height={104} className="size-[104px] rounded-[1.3rem] object-cover" priority />
+        <div className="overflow-hidden rounded-full bg-white/70 p-2 shadow-[0_18px_44px_-16px_oklch(0.45_0.08_40/0.5)] ring-1 ring-white/60 backdrop-blur-sm">
+          <Image src="/logo.png" alt="HaanHaan" width={104} height={104} className="size-[104px] rounded-full object-cover" priority />
         </div>
         <p className="mt-4 text-center text-sm font-medium text-foreground/55">
           หารค่าใช้จ่าย หารความสบายใจ

@@ -89,10 +89,9 @@ export function AppHeader({
               type="button"
               onClick={() => setShowGroups((v) => !v)}
               aria-label="เลือกกลุ่ม"
-              className="flex items-center gap-2 rounded-full bg-card py-1.5 pl-1.5 pr-3 text-xs font-semibold text-foreground shadow-sm ring-1 ring-border transition active:scale-95"
+              className="flex items-center gap-1.5 rounded-full bg-card py-1.5 pl-1.5 pr-2.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-border transition active:scale-95"
             >
               <GroupAvatar group={group} size={26} />
-              <span className="max-w-[8.5rem] truncate">{group.name}</span>
               <ChevronDown className={`size-3.5 text-muted-foreground transition ${showGroups ? "rotate-180" : ""}`} />
             </button>
 
@@ -192,7 +191,7 @@ export function AppHeader({
 
         {/* greeting + current member (display only — settings live in the bottom nav) */}
         <div className="mt-3 flex items-center gap-3">
-          <MemberAvatar member={member} size={44} className="shadow-sm ring-1 ring-border" />
+          <MemberAvatar member={member} size={44} illoFill={98} className="shadow-sm ring-1 ring-border" />
           <div className="text-left leading-tight">
             <p className="text-xs text-muted-foreground">{greeting()}</p>
             <p className="text-base font-semibold text-foreground">{member.name}</p>

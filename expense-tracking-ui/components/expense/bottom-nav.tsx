@@ -1,6 +1,6 @@
 "use client"
 
-import { Home, PieChart, Clock, Plus, Settings } from "lucide-react"
+import { Home, PieChart, Clock, Settings } from "lucide-react"
 
 const leftTabs = [
   { id: "home", label: "หน้าหลัก", icon: Home },
@@ -71,9 +71,9 @@ export function BottomNav({
           type="button"
           onClick={onAdd}
           aria-label="เพิ่มรายการ"
-          className="absolute -top-9 left-1/2 grid size-16 -translate-x-1/2 place-items-center rounded-full bg-accent text-accent-foreground shadow-[0_10px_24px_-6px_oklch(0.3_0.04_55/0.6)] ring-4 ring-card transition active:scale-95"
+          className="absolute -top-9 left-1/2 grid size-16 -translate-x-1/2 place-items-center overflow-hidden rounded-full bg-accent text-accent-foreground shadow-[0_10px_24px_-6px_oklch(0.3_0.04_55/0.6)] ring-4 ring-card transition active:scale-95"
         >
-          <Plus className="size-7" strokeWidth={2.5} />
+          <img src="/goose.png" alt="" className="size-[4.2rem] object-contain" />
         </button>
       </div>
     </nav>

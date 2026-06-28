@@ -13,8 +13,8 @@ export default function LoginPage() {
       <div className="relative w-full max-w-sm">
         {/* Brand */}
         <div className="flex flex-col items-center text-center">
-          <div className="grid size-20 place-items-center rounded-3xl bg-card shadow-sm ring-1 ring-border">
-            <Image src="/logo.png" alt="HaanHaan" width={56} height={56} className="size-14 object-contain" priority />
+          <div className="grid size-20 place-items-center overflow-hidden rounded-full bg-card shadow-sm ring-1 ring-border">
+            <Image src="/logo.png" alt="HaanHaan" width={80} height={80} className="size-20 rounded-full object-cover" priority />
           </div>
           <h1 className="mt-4 text-3xl font-extrabold tracking-tight text-foreground">HaanHaan</h1>
           <p className="mt-1 text-base font-medium text-foreground/80">

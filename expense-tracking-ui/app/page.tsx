@@ -529,6 +529,7 @@ export default function Page() {
                 net={net}
                 members={group.members}
                 currentMemberId={member.id}
+                balances={balances}
                 onRequestSettle={() => setShowSettlement(true)}
               />
               <RecentList
