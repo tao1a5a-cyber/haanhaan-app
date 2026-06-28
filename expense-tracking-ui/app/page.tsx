@@ -329,14 +329,22 @@ export default function Page() {
   async function handleCreateGroup(name: string): Promise<Group | null> {
     // Pass the host so the new group is owned by its creator (also stamped
     // server-side by the set_group_host trigger under the strict RLS model).
-    const g = await createGroup(name, authUserId ?? undefined)
-    if (!g) {
-      // Surface the failure instead of silently resetting the form.
-      alert("สร้างกลุ่มไม่สำเร็จ กรุณาลองใหม่อีกครั้ง")
+    try {
+      const g = await createGroup(name, authUserId ?? undefined)
+      if (!g) {
+        alert("สร้างกลุ่มไม่สำเร็จ กรุณาลองใหม่อีกครั้ง")
+        return null
+      }
+      setGroups((prev) => [...prev, g])
+      return g
+    } catch (e) {
+      // Surface the real DB/RLS message so failures are diagnosable.
+      const err = e as { message?: string; code?: string; details?: string }
+      const detail = err?.message || err?.details || "unknown error"
+      alert(`สร้างกลุ่มไม่สำเร็จ\n${detail}${err?.code ? `\n(code: ${err.code})` : ""}`)
+      console.error("handleCreateGroup", e)
       return null
     }
-    setGroups((prev) => [...prev, g])
-    return g
   }
 
   async function handleAddMember(

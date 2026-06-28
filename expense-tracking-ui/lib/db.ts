@@ -171,13 +171,18 @@ export async function createGroup(name: string, hostUserId?: string): Promise<Gr
     const { data: { user } } = await db.auth.getUser()
     host = user?.id ?? null
   }
+  // No session at all → fail loudly so the UI can tell the user to sign in
+  // (rather than silently inserting a host-less row that RLS then hides).
+  if (!host) throw new Error("ยังไม่ได้เข้าสู่ระบบ (ไม่พบบัญชีผู้ใช้) — กรุณาเข้าสู่ระบบใหม่")
 
   const { data, error } = await db
     .from("groups")
     .insert({ name, host_user_id: host })
     .select("*")
     .single()
-  if (error) { console.error("createGroup", error); return null }
+  // Re-throw the DB error so the caller can surface its message (RLS, missing
+  // column, etc.) instead of a silent null.
+  if (error) { console.error("createGroup", error); throw error }
   return mapGroup(data, [])
 }
 
