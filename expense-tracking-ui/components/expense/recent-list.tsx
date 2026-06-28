@@ -41,7 +41,7 @@ export function RecentList({
       </div>
 
       {items.length === 0 ? (
-        <div className="flex flex-col items-center gap-2 rounded-[1.5rem] bg-card py-10 ring-1 ring-border">
+        <div className="flex flex-col items-center gap-2 overflow-hidden rounded-[1.5rem] bg-card py-10 ring-1 ring-border">
           <div className="grid size-12 place-items-center rounded-full bg-secondary text-muted-foreground">
             <Inbox className="size-6" />
           </div>
@@ -63,7 +63,7 @@ export function RecentList({
             return (
               <li
                 key={tx.id}
-                className="flex items-center gap-3 rounded-2xl bg-card p-3.5 ring-1 ring-border transition active:scale-[0.99]"
+                className="flex items-center gap-3 overflow-hidden rounded-2xl bg-card p-3.5 ring-1 ring-border transition active:scale-[0.99]"
               >
                 <span className={`grid size-11 shrink-0 place-items-center rounded-xl ${cat.tint}`}>
                   <CategoryGlyph category={cat} size={20} />

@@ -160,9 +160,21 @@ export async function createGroup(name: string, hostUserId?: string): Promise<Gr
   if (isGuestMode()) return guest.guestCreateGroup(name)
   const db = tryGetSupabase()
   if (!db) return null
+
+  // Resolve the host from the LIVE session, not just the passed value. On a
+  // brand-new login the caller's React state may still hold a null uid, and the
+  // strict RLS insert policy (groups_insert_own) rejects a row whose
+  // host_user_id !== auth.uid(). Reading the session here guarantees the stamp
+  // is correct so the creator can immediately see the group they just made.
+  let host = hostUserId ?? null
+  if (!host) {
+    const { data: { user } } = await db.auth.getUser()
+    host = user?.id ?? null
+  }
+
   const { data, error } = await db
     .from("groups")
-    .insert({ name, host_user_id: hostUserId ?? null })
+    .insert({ name, host_user_id: host })
     .select("*")
     .single()
   if (error) { console.error("createGroup", error); return null }

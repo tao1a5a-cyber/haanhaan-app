@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { X } from "lucide-react"
+import { X, Eye } from "lucide-react"
 import { AppHeader } from "@/components/expense/app-header"
 import { BalanceCard } from "@/components/expense/balance-card"
 import { AddTransaction } from "@/components/expense/add-transaction"
@@ -81,7 +81,15 @@ export default function Page() {
   // signed-in Supabase account (shared cookie session)
   const [authEmail, setAuthEmail] = useState<string | null>(null)
   const [authUserId, setAuthUserId] = useState<string | null>(null)
+  // true for an anonymous (Room Code) session — these guests are read-only until
+  // they sign in with a real account and claim a profile.
+  const [authIsAnonymous, setAuthIsAnonymous] = useState(false)
+  // when re-entering after a fresh join, start EntryScreen on a specific step
+  const [entryStep, setEntryStep] = useState<"group" | "member" | "profile" | null>(null)
   const [themeMode] = useThemeMode()
+
+  // Anonymous room guests may browse but not write; lifted once they authenticate.
+  const readOnly = authIsAnonymous
 
   // ── Auth gate: send unauthenticated visitors to /login ─────
   // Also drives the header's signed-in email indicator + identity binding.
@@ -94,11 +102,13 @@ export default function Page() {
     getCurrentUser().then((u) => {
       setAuthEmail(u?.email || null)
       setAuthUserId(u?.id ?? null)
+      setAuthIsAnonymous(!!u?.isAnonymous)
       if (!u) window.location.href = "/login"
     })
     return onAuthChange((u) => {
       setAuthEmail(u?.email || null)
       setAuthUserId(u?.id ?? null)
+      setAuthIsAnonymous(!!u?.isAnonymous)
       if (!u) window.location.href = "/login"
     })
   }, [])
@@ -113,6 +123,7 @@ export default function Page() {
         exitLocalModes()
         setAuthEmail(me.email || null)
         setAuthUserId(me.id)
+        setAuthIsAnonymous(false)
         const gs = await fetchGroups()
         setGroups(gs)
 
@@ -146,18 +157,21 @@ export default function Page() {
       }
 
       // 3) Anonymous Room guest — RLS returns only the group(s) they redeemed a
-      //    code for. Let them pick a member; the anonymous session persists.
+      //    code for. Read-only: they land on the profile step (sign-in prompt),
+      //    or resume the member they were last viewing as.
       if (me) {
         setAuthUserId(me.id)
+        setAuthIsAnonymous(true)
         const gs = await fetchGroups()
         setGroups(gs)
-        if (gs.length > 0) setEntryGroupId(gs[0].id)
         const last = loadLastContext()
         if (last) {
           const g = gs.find((x) => x.id === last.groupId)
           const m = g?.members.find((x) => x.id === last.memberId)
-          if (g && m) { setEntryGroupId(g.id); await enterAs(g, m) }
+          if (g && m) { setEntryGroupId(g.id); await enterAs(g, m); setLoading(false); return }
         }
+        // Freshly joined via a Room Code → show the profile / read-only screen.
+        if (gs.length > 0) { setEntryGroupId(gs[0].id); setEntryStep("profile") }
         setLoading(false)
         return
       }
@@ -249,7 +263,7 @@ export default function Page() {
     tx: Omit<Transaction, "id" | "createdAt" | "payerId" | "groupId">,
     slipFile?: File,
   ) {
-    if (!group || !member) return
+    if (!group || !member || readOnly) return
 
     // Guest mode is capped — nudge to the cloud once the local limit is hit.
     if (isGuestMode() && guestTransactionCount() >= GUEST_TX_LIMIT) {
@@ -285,11 +299,13 @@ export default function Page() {
   }
 
   function handleEdit(updated: Transaction) {
+    if (readOnly) return
     setTransactions((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
     updateTransaction(updated)
   }
 
   function handleDelete(txId: string) {
+    if (readOnly) return
     setTransactions((prev) => prev.filter((t) => t.id !== txId))
     deleteTransaction(txId)
   }
@@ -302,7 +318,7 @@ export default function Page() {
   }
 
   function handleConfirmSettle() {
-    if (!group || !member) return
+    if (!group || !member || readOnly) return
     setTransactions((prev) => prev.map((t) => ({ ...t, settled: true })))
     setShowSettlement(false)
     settleAllTransactions(group.id)
@@ -314,7 +330,11 @@ export default function Page() {
     // Pass the host so the new group is owned by its creator (also stamped
     // server-side by the set_group_host trigger under the strict RLS model).
     const g = await createGroup(name, authUserId ?? undefined)
-    if (!g) return null
+    if (!g) {
+      // Surface the failure instead of silently resetting the form.
+      alert("สร้างกลุ่มไม่สำเร็จ กรุณาลองใหม่อีกครั้ง")
+      return null
+    }
     setGroups((prev) => [...prev, g])
     return g
   }
@@ -333,14 +353,15 @@ export default function Page() {
 
   /** Remember "this email = this member" so next login enters directly. */
   function bindMemberToMe(m: Member) {
-    if (!authUserId || m.userId) return // unauthenticated or already bound
+    // Anonymous room guests can't claim (writes are blocked) — skip silently.
+    if (!authUserId || authIsAnonymous || m.userId) return // unauthenticated/guest or already bound
     claimMember(m.id, authUserId)
     applyMemberUpdate(m.id, { userId: authUserId })
   }
 
   /** Settings: assign my email to a chosen member, moving it off any previous one. */
   function handleClaimMember(memberId: string) {
-    if (!authUserId || !group) return
+    if (!authUserId || !group || readOnly) return
     const prev = group.members.find((m) => m.userId === authUserId)
     if (prev && prev.id !== memberId) {
       releaseMember(prev.id)
@@ -377,19 +398,19 @@ export default function Page() {
   }
 
   function handleSettingsSave(updated: Partial<Member>, pinHash?: string | null) {
-    if (!member) return
+    if (!member || readOnly) return
     setMember((prev) => (prev ? { ...prev, ...updated } : prev))
     applyMemberUpdate(member.id, updated)
     updateMember(member.id, updated, pinHash)
   }
 
   async function handleAddGroupMember(name: string) {
-    if (!group) return
+    if (!group || readOnly) return
     await handleAddMember(group.id, { name })
   }
 
   function handleRemoveMember(memberId: string) {
-    if (!group) return
+    if (!group || readOnly) return
     setGroups((prev) =>
       prev.map((g) => (g.id === group.id ? { ...g, members: g.members.filter((m) => m.id !== memberId) } : g)),
     )
@@ -398,7 +419,7 @@ export default function Page() {
   }
 
   function handleRenameGroup(name: string) {
-    if (!group) return
+    if (!group || readOnly) return
     setGroups((prev) => prev.map((g) => (g.id === group.id ? { ...g, name } : g)))
     setGroup((prev) => (prev ? { ...prev, name } : prev))
     renameGroup(group.id, name)
@@ -406,7 +427,7 @@ export default function Page() {
 
   /** Settings: mint (or reveal) the active group's shareable Room Code. */
   async function handleGenerateRoomCode(): Promise<string | null> {
-    if (!group) return null
+    if (!group || readOnly) return null
     const code = await ensureRoomCode(group.id, group.roomCode)
     if (code) {
       setGroups((prev) => prev.map((g) => (g.id === group.id ? { ...g, roomCode: code } : g)))
@@ -416,7 +437,7 @@ export default function Page() {
   }
 
   function handleSaveGroupAvatar(avatarUrl: string) {
-    if (!group) return
+    if (!group || readOnly) return
     setGroups((prev) => prev.map((g) => (g.id === group.id ? { ...g, avatar: avatarUrl } : g)))
     setGroup((prev) => (prev ? { ...prev, avatar: avatarUrl } : prev))
     updateGroupAvatar(group.id, avatarUrl)
@@ -484,9 +505,13 @@ export default function Page() {
       <EntryScreen
         groups={groups}
         initialGroupId={entryGroupId}
+        initialStep={entryStep}
+        readOnly={readOnly}
+        authEmail={authEmail}
         onEnter={enterAs}
         onCreateGroup={handleCreateGroup}
         onAddMember={handleAddMember}
+        onCreateProfile={handleAddMember}
       />
     )
   }
@@ -525,6 +550,24 @@ export default function Page() {
               onMarkAllRead={handleMarkAllRead}
             />
             <div className="space-y-5 pt-2">
+              {readOnly && (
+                <div className="mx-5 flex items-center gap-3 rounded-[1.4rem] bg-accent/10 p-4 ring-1 ring-accent/25">
+                  <span className="grid size-9 shrink-0 place-items-center rounded-full bg-accent/15 text-accent">
+                    <Eye className="size-[18px]" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-foreground">โหมดอ่านอย่างเดียว</p>
+                    <p className="text-xs text-muted-foreground">เข้าสู่ระบบเพื่อเพิ่มและแก้ไขรายการ</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { window.location.href = "/login" }}
+                    className="shrink-0 rounded-full bg-accent px-3.5 py-2 text-xs font-semibold text-accent-foreground transition active:scale-95"
+                  >
+                    เข้าสู่ระบบ
+                  </button>
+                </div>
+              )}
               <BalanceCard
                 net={net}
                 members={group.members}
@@ -567,6 +610,7 @@ export default function Page() {
             categories={allCategories}
             members={group.members}
             currentMember={member}
+            readOnly={readOnly}
             onEdit={handleEdit}
             onDelete={handleDelete}
             onNotify={notifyOthers}
@@ -578,6 +622,7 @@ export default function Page() {
             embedded
             group={group}
             member={member}
+            readOnly={readOnly}
             authEmail={authEmail}
             authUserId={authUserId}
             onClaimMember={handleClaimMember}
@@ -592,7 +637,7 @@ export default function Page() {
         )}
       </div>
 
-      <BottomNav active={tab} onChange={setTab} onAdd={() => setShowAddForm(true)} />
+      <BottomNav active={tab} onChange={setTab} canAdd={!readOnly} onAdd={() => setShowAddForm(true)} />
 
       {/* One-click add: the FAB opens the expense form directly */}
       {showAddForm && (
@@ -635,6 +680,7 @@ export default function Page() {
           members={group.members}
           currentMemberId={member.id}
           balances={balances}
+          readOnly={readOnly}
           onConfirm={handleConfirmSettle}
           onClose={() => setShowSettlement(false)}
         />

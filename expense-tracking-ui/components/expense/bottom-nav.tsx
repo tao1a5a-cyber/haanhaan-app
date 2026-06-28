@@ -15,11 +15,14 @@ export function BottomNav({
   active,
   onChange,
   onAdd,
+  canAdd = true,
 }: {
   active: string
   onChange: (id: string) => void
   /** open the quick-add bottom sheet */
   onAdd: () => void
+  /** when false (read-only guests), the central "+" FAB is hidden */
+  canAdd?: boolean
 }) {
   function Tab({ id, label, icon: Icon }: { id: string; label: string; icon: typeof Home }) {
     const isActive = active === id
@@ -66,15 +69,18 @@ export function BottomNav({
           ))}
         </div>
 
-        {/* Prominent floating "+" — always accessible without scrolling */}
-        <button
-          type="button"
-          onClick={onAdd}
-          aria-label="เพิ่มรายการ"
-          className="absolute -top-9 left-1/2 grid size-16 -translate-x-1/2 place-items-center overflow-hidden rounded-full bg-accent text-accent-foreground shadow-[0_10px_24px_-6px_oklch(0.3_0.04_55/0.6)] ring-4 ring-card transition active:scale-95"
-        >
-          <img src="/goose.png" alt="" className="size-[4.2rem] object-contain" />
-        </button>
+        {/* Prominent floating "+" — always accessible without scrolling.
+            Hidden for read-only guests who can't add transactions. */}
+        {canAdd && (
+          <button
+            type="button"
+            onClick={onAdd}
+            aria-label="เพิ่มรายการ"
+            className="absolute -top-9 left-1/2 grid size-16 -translate-x-1/2 place-items-center overflow-hidden rounded-full bg-accent text-accent-foreground shadow-[0_10px_24px_-6px_oklch(0.3_0.04_55/0.6)] ring-4 ring-card transition active:scale-95"
+          >
+            <img src="/goose.png" alt="" className="size-[4.2rem] object-contain" />
+          </button>
+        )}
       </div>
     </nav>
   )
