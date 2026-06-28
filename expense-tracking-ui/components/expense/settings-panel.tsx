@@ -1,10 +1,13 @@
 "use client"
 
 import { useRef, useState } from "react"
-import { X, Eye, EyeOff, Camera, Loader2, UserCog, Users, Palette, Lock, Trash2, UserPlus, Check, ImagePlus, KeyRound, Copy } from "lucide-react"
+import { X, Eye, EyeOff, Camera, Loader2, UserCog, Users, Palette, Lock, Trash2, UserPlus, Check, ImagePlus, KeyRound, Copy, Sun, Moon, ChevronDown } from "lucide-react"
+import { useThemeMode } from "@/lib/theme"
 import { isCustomAvatar } from "./users"
 import { MemberAvatar } from "./member-avatar"
 import { GroupAvatar } from "./group-avatar"
+import { AvatarWheel } from "./avatar-wheel"
+import { avatarLabel } from "./avatars"
 import { THEMES } from "./themes"
 import { cropToCircle, uploadAvatar } from "@/lib/storage"
 import { hashPin } from "@/lib/pin"
@@ -14,7 +17,7 @@ import type { Group, Member } from "./types"
 type Props = {
   group: Group
   member: Member
-  onSave: (updated: Partial<Member>, pinHash?: string) => void
+  onSave: (updated: Partial<Member>, pinHash?: string | null) => void
   onAddMember: (name: string) => void
   onRemoveMember: (id: string) => void
   onRenameGroup: (name: string) => void
@@ -39,6 +42,8 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
   const [avatar, setAvatar] = useState(member.avatar)
   const [avatarBlob, setAvatarBlob] = useState<Blob | null>(null)
   const [themeId, setThemeId] = useState(member.themeId ?? "amber")
+  const [showThemes, setShowThemes] = useState(false)
+  const [showAvatarWheel, setShowAvatarWheel] = useState(false)
   const avatarInputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
 
@@ -57,6 +62,8 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
 
   const [groupName, setGroupName] = useState(group.name)
   const [newMember, setNewMember] = useState("")
+
+  const [themeMode, toggleTheme] = useThemeMode()
 
   // ── Room Code (shareable, cloud-only) ──
   const [roomCode, setRoomCode] = useState(group.roomCode ?? "")
@@ -134,6 +141,9 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
         } else {
           updated.avatar = avatar
         }
+      } else if (avatar !== (member.avatar ?? "")) {
+        // Bundled avatar picked from the wheel (no file upload).
+        updated.avatar = avatar
       }
       if (themeId !== (member.themeId ?? "amber")) {
         updated.themeId = themeId
@@ -171,6 +181,12 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
     } finally {
       setSavingPin(false)
     }
+  }
+
+  function handleRemovePin() {
+    if (!confirm("ต้องการลบรหัสผ่านของโปรไฟล์นี้ใช่ไหม? หลังจากนี้จะเข้าโปรไฟล์ได้โดยไม่ต้องใส่รหัส")) return
+    onSave({}, null)  // null clears pin_hash + pin_salt
+    setSection("main"); setPin(""); setConfirmPin(""); setPinError("")
   }
 
   function handleAddMember() {
@@ -218,7 +234,7 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                     >
                       {avatar && !avatar.endsWith("/placeholder.svg") ? (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={avatar} alt="" className={customAvatar ? "absolute inset-0 size-full object-cover" : "size-[72%] object-contain"} />
+                        <img src={avatar} alt="" className={customAvatar ? "absolute inset-0 size-full object-cover" : "size-[98%] object-contain"} />
                       ) : (
                         <span className="text-2xl font-bold text-foreground/80">{(name || member.name).charAt(0)}</span>
                       )}
@@ -243,30 +259,82 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                   <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarFile} />
                 </div>
 
-                {/* Theme */}
-                <div className="mt-4 flex items-center gap-2 text-xs font-semibold text-muted-foreground">
-                  <Palette className="size-3.5" /> สีธีม
-                </div>
-                <div className="mt-2 grid grid-cols-3 gap-2">
-                  {THEMES.map((theme) => (
-                    <button
-                      key={theme.id}
-                      type="button"
-                      onClick={() => setThemeId(theme.id)}
-                      aria-label={theme.label}
-                      className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-xs font-medium transition active:scale-95 ${themeId === theme.id ? "shadow-sm" : "bg-secondary text-muted-foreground"}`}
-                      style={themeId === theme.id ? { backgroundColor: theme.vars.accent, color: "white" } : undefined}
-                    >
-                      <span className="size-3.5 shrink-0 rounded-full border border-white/30 shadow-sm" style={{ backgroundColor: theme.swatch }} />
-                      {theme.label}
-                    </button>
-                  ))}
-                </div>
+                {/* Profile avatar wheel — tap to slide-pick a goose */}
+                <button
+                  type="button"
+                  onClick={() => setShowAvatarWheel(true)}
+                  className="mt-3 flex w-full items-center justify-between rounded-xl bg-secondary px-4 py-3 text-sm font-medium text-foreground transition active:scale-[0.98]"
+                >
+                  <span className="flex items-center gap-2">
+                    <UserCog className="size-4 text-muted-foreground" /> โปรไฟล์
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">{avatarLabel(avatar) ?? "เลือกห่าน"}</span>
+                    <span className="text-xs text-muted-foreground">→</span>
+                  </span>
+                </button>
+
+                {/* Theme — collapsed by default; tap to reveal the colors */}
+                <button
+                  type="button"
+                  onClick={() => setShowThemes((v) => !v)}
+                  aria-expanded={showThemes}
+                  className="mt-4 flex w-full items-center justify-between rounded-xl bg-secondary px-4 py-3 text-sm font-medium text-foreground transition active:scale-[0.98]"
+                >
+                  <span className="flex items-center gap-2">
+                    <Palette className="size-4 text-muted-foreground" /> สีธีม
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <span className="size-4 shrink-0 rounded-full border border-border shadow-sm" style={{ backgroundColor: activeTheme.swatch }} />
+                    <span className="text-xs text-muted-foreground">{activeTheme.label}</span>
+                    <ChevronDown className={`size-4 text-muted-foreground transition ${showThemes ? "rotate-180" : ""}`} />
+                  </span>
+                </button>
+                {showThemes && (
+                  <div className="mt-2 grid grid-cols-3 gap-2">
+                    {THEMES.map((theme) => (
+                      <button
+                        key={theme.id}
+                        type="button"
+                        onClick={() => setThemeId(theme.id)}
+                        aria-label={theme.label}
+                        className={`flex items-center gap-2 rounded-xl px-3 py-2.5 text-xs font-medium transition active:scale-95 ${themeId === theme.id ? "shadow-sm" : "bg-secondary text-muted-foreground"}`}
+                        style={themeId === theme.id ? { backgroundColor: theme.vars.accent, color: "white" } : undefined}
+                      >
+                        <span className="size-3.5 shrink-0 rounded-full border border-white/30 shadow-sm" style={{ backgroundColor: theme.swatch }} />
+                        {theme.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
                 {/* PIN */}
                 <button type="button" onClick={() => setSection("pin")} className="mt-4 flex w-full items-center justify-between rounded-xl bg-secondary px-4 py-3 text-sm font-medium text-foreground transition active:scale-[0.98]">
                   <span className="flex items-center gap-2"><Lock className="size-4 text-muted-foreground" /> ตั้ง / เปลี่ยนรหัสผ่าน</span>
                   <span className="text-xs text-muted-foreground">→</span>
+                </button>
+              </SectionCard>
+
+              {/* ── Appearance / dark mode ── */}
+              <SectionCard icon={themeMode === "dark" ? <Moon className="size-4" /> : <Sun className="size-4" />} title="ธีมการแสดงผล" accent={activeTheme.vars.accent}>
+                <button
+                  type="button"
+                  onClick={toggleTheme}
+                  role="switch"
+                  aria-checked={themeMode === "dark"}
+                  className="flex w-full items-center justify-between rounded-xl bg-secondary px-4 py-3 text-sm font-medium text-foreground transition active:scale-[0.98]"
+                >
+                  <span className="flex items-center gap-2">
+                    {themeMode === "dark" ? <Moon className="size-4 text-muted-foreground" /> : <Sun className="size-4 text-muted-foreground" />}
+                    โหมดมืด
+                  </span>
+                  <span
+                    className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${themeMode === "dark" ? "bg-accent" : "bg-border"}`}
+                  >
+                    <span
+                      className={`absolute top-0.5 size-5 rounded-full bg-card shadow-sm transition-all ${themeMode === "dark" ? "left-[1.375rem]" : "left-0.5"}`}
+                    />
+                  </span>
                 </button>
               </SectionCard>
 
@@ -281,7 +349,7 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                     aria-label="เปลี่ยนรูปกลุ่ม"
                   >
                     <GroupAvatar group={{ name: groupName || group.name, avatar: groupAvatar }} size={64} className="shadow-sm ring-2 ring-border" />
-                    <span className="absolute inset-0 flex items-center justify-center rounded-[1.25rem] bg-foreground/0 transition group-hover:bg-foreground/25">
+                    <span className="absolute inset-0 flex items-center justify-center rounded-full bg-foreground/0 transition group-hover:bg-foreground/25">
                       <Camera className="size-5 text-white opacity-0 drop-shadow transition group-hover:opacity-100" />
                     </span>
                   </button>
@@ -464,9 +532,30 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                 {savingPin && <Loader2 className="size-4 animate-spin" />}
                 บันทึกรหัสผ่าน
               </button>
+              <button
+                type="button"
+                onClick={handleRemovePin}
+                disabled={savingPin}
+                className="flex w-full items-center justify-center gap-2 rounded-2xl py-3 text-sm font-medium text-destructive transition active:scale-[0.98] disabled:opacity-60"
+              >
+                <Trash2 className="size-4" />
+                ลบรหัสผ่าน
+              </button>
+              <p className="text-center text-[11px] leading-relaxed text-muted-foreground">
+                ลบรหัสผ่านเพื่อให้เข้าโปรไฟล์นี้ได้โดยไม่ต้องใส่รหัส
+              </p>
             </div>
           )}
       </div>
+
+      {showAvatarWheel && (
+        <AvatarWheel
+          valueSrc={avatar}
+          tint={activeTheme.tint}
+          onConfirm={(src) => { setAvatar(src); setAvatarBlob(null) }}
+          onClose={() => setShowAvatarWheel(false)}
+        />
+      )}
     </>
   )
 

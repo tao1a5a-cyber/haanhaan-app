@@ -92,6 +92,32 @@ export const THEMES: ThemePreset[] = [
       "chart-1": "oklch(0.60 0.22 295)",
     },
   },
+  {
+    id: "noir",
+    label: "ดำ",
+    swatch: "oklch(0.28 0 0)",
+    tint: "oklch(0.91 0 0)",
+    vars: {
+      background: "oklch(0.975 0 0)",
+      primary: "oklch(0.28 0 0)",
+      accent: "oklch(0.32 0 0)",
+      ring: "oklch(0.32 0 0)",
+      "chart-1": "oklch(0.32 0 0)",
+    },
+  },
+  {
+    id: "slate",
+    label: "เทา",
+    swatch: "oklch(0.56 0.01 250)",
+    tint: "oklch(0.92 0.004 250)",
+    vars: {
+      background: "oklch(0.974 0.003 250)",
+      primary: "oklch(0.43 0.012 250)",
+      accent: "oklch(0.56 0.018 250)",
+      ring: "oklch(0.56 0.018 250)",
+      "chart-1": "oklch(0.56 0.018 250)",
+    },
+  },
 ]
 
 export const DEFAULT_THEME = THEMES[0]

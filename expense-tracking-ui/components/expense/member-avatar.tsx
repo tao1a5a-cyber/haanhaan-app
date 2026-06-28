@@ -6,6 +6,8 @@ type Props = {
   /** pixel size of the circle */
   size?: number
   className?: string
+  /** how much of the circle a bundled illustration fills (percent, default 72) */
+  illoFill?: number
 }
 
 /**
@@ -14,7 +16,7 @@ type Props = {
  *  - bundled /avatars illustration → small over the tint background
  *  - no image        → first initial centered on the tint background
  */
-export function MemberAvatar({ member, size = 44, className = "" }: Props) {
+export function MemberAvatar({ member, size = 44, className = "", illoFill = 72 }: Props) {
   const custom = isCustomAvatar(member.avatar)
   const hasImage = hasAvatarImage(member)
 
@@ -28,7 +30,8 @@ export function MemberAvatar({ member, size = 44, className = "" }: Props) {
         <img
           src={member.avatar}
           alt=""
-          className={custom ? "absolute inset-0 size-full object-cover" : "size-[72%] object-contain"}
+          className={custom ? "absolute inset-0 size-full object-cover" : "object-contain"}
+          style={custom ? undefined : { width: `${illoFill}%`, height: `${illoFill}%` }}
         />
       ) : (
         <span

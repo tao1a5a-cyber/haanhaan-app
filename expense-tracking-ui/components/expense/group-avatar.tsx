@@ -2,23 +2,22 @@ import type { Group } from "./types"
 
 type Props = {
   group: Pick<Group, "name" | "avatar">
-  /** pixel size of the rounded square */
+  /** pixel diameter of the circle */
   size?: number
   className?: string
 }
 
 /**
- * Renders a group's image as a rounded square — its uploaded photo, or the
+ * Renders a group's image as a perfect circle — its uploaded photo, or the
  * first character of its name on a soft accent background as a fallback.
  */
 export function GroupAvatar({ group, size = 40, className = "" }: Props) {
   const hasImage = Boolean(group.avatar)
-  const radius = Math.round(size * 0.32)
 
   return (
     <span
-      className={`relative grid shrink-0 place-items-center overflow-hidden bg-accent/12 text-accent ${className}`}
-      style={{ width: size, height: size, borderRadius: radius }}
+      className={`relative grid shrink-0 place-items-center overflow-hidden rounded-full bg-accent/12 text-accent ${className}`}
+      style={{ width: size, height: size }}
     >
       {hasImage ? (
         // eslint-disable-next-line @next/next/no-img-element

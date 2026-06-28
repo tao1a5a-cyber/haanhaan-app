@@ -4,7 +4,7 @@ import {
   Car,
   PartyPopper,
   PawPrint,
-  Ellipsis,
+  PiggyBank,
   type LucideIcon,
 } from "lucide-react"
 
@@ -15,6 +15,8 @@ export type Category = {
   label: string
   /** built-in categories use a Lucide icon */
   icon?: LucideIcon
+  /** illustrated categories use an image (public/ path) — takes priority */
+  image?: string
   /** custom categories use an emoji glyph */
   emoji?: string
   /** tailwind classes for the soft icon chip background + foreground */
@@ -23,13 +25,19 @@ export type Category = {
   color: string
 }
 
+// Order follows the illustrated icon sheet (reading order, top-left → bottom-right).
+// IDs are kept stable so existing transactions keep their category mapping;
+// only labels + artwork changed.
+// Illustrated icons render frameless (transparent PNG, no tint circle); `tint`
+// is left blank so the icon-chip wrapper draws no background. `color` is still
+// used for charts/progress bars.
 export const categories: Category[] = [
-  { id: "food", label: "อาหาร", icon: UtensilsCrossed, tint: "bg-[oklch(0.94_0.05_55)] text-[oklch(0.5_0.13_45)]", color: "oklch(0.64 0.15 45)" },
-  { id: "supplies", label: "ของใช้", icon: ShoppingBag, tint: "bg-[oklch(0.93_0.05_300)] text-[oklch(0.5_0.13_310)]", color: "oklch(0.58 0.15 310)" },
-  { id: "travel", label: "เดินทาง", icon: Car, tint: "bg-[oklch(0.92_0.06_240)] text-[oklch(0.5_0.13_250)]", color: "oklch(0.58 0.13 250)" },
-  { id: "fun", label: "เที่ยว", icon: PartyPopper, tint: "bg-[oklch(0.93_0.06_150)] text-[oklch(0.48_0.12_155)]", color: "oklch(0.56 0.12 155)" },
-  { id: "pet", label: "สัตว์เลี้ยง", icon: PawPrint, tint: "bg-[oklch(0.93_0.05_80)] text-[oklch(0.5_0.12_70)]", color: "oklch(0.64 0.12 70)" },
-  { id: "other", label: "อื่นๆ", icon: Ellipsis, tint: "bg-muted text-muted-foreground", color: "oklch(0.62 0.02 60)" },
+  { id: "food", label: "อาหาร", icon: UtensilsCrossed, image: "/categories/food.png?v=2", tint: "", color: "oklch(0.64 0.15 45)" },
+  { id: "other", label: "เก็บเงิน", icon: PiggyBank, image: "/categories/savings.png?v=2", tint: "", color: "oklch(0.66 0.14 12)" },
+  { id: "travel", label: "เดินทาง", icon: Car, image: "/categories/travel.png?v=2", tint: "", color: "oklch(0.58 0.13 250)" },
+  { id: "fun", label: "ท่องเที่ยว", icon: PartyPopper, image: "/categories/tourism.png?v=2", tint: "", color: "oklch(0.58 0.15 310)" },
+  { id: "pet", label: "สัตว์เลี้ยง", icon: PawPrint, image: "/categories/pet.png?v=2", tint: "", color: "oklch(0.64 0.12 70)" },
+  { id: "supplies", label: "ช้อปปิ้ง", icon: ShoppingBag, image: "/categories/shopping.png?v=2", tint: "", color: "oklch(0.56 0.12 155)" },
 ]
 
 /** soft tint palette cycled through for user-created categories */

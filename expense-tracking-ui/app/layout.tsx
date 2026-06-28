@@ -40,7 +40,16 @@ export default function RootLayout({
     <html
       lang="th"
       className={`light ${notoThai.variable} ${geistMono.variable} bg-background`}
+      suppressHydrationWarning
     >
+      <head>
+        {/* Apply the saved theme before paint to avoid a light→dark flash. */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){try{if(localStorage.getItem('haanhaan:theme')==='dark'){var e=document.documentElement;e.classList.remove('light');e.classList.add('dark');}}catch(e){}})();`,
+          }}
+        />
+      </head>
       <body className="font-sans antialiased">
         {children}
       </body>
