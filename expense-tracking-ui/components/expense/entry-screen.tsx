@@ -1,8 +1,8 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import Image from "next/image"
-import { ChevronLeft, Plus, Users, ArrowRight, X, UserPlus, Camera, Check, Eye, LogIn } from "lucide-react"
+import { ChevronLeft, Plus, Users, ArrowRight, X, UserPlus, Camera, Check, Eye, LogIn, LogOut } from "lucide-react"
 import { MemberAvatar } from "./member-avatar"
 import { GroupAvatar } from "./group-avatar"
 import { AvatarWheel } from "./avatar-wheel"
@@ -33,6 +33,8 @@ type Props = {
   onAddMember: (groupId: string, draft: { name: string }) => Promise<Member | null>
   /** create the current user's own profile (member) in a group, then enter it */
   onCreateProfile: (groupId: string, draft: { name: string; avatar?: string }) => Promise<Member | null>
+  /** sign out (shown on this screen so a user can switch accounts / fix a wrong login) */
+  onLogout?: () => void
 }
 
 export function EntryScreen({
@@ -45,6 +47,7 @@ export function EntryScreen({
   onCreateGroup,
   onAddMember,
   onCreateProfile,
+  onLogout,
 }: Props) {
   const [themeMode] = useThemeMode()
   const [step, setStep] = useState<Step>(initialStep ?? (initialGroupId ? "member" : "group"))
@@ -128,6 +131,18 @@ export function EntryScreen({
         className="pointer-events-none absolute -right-20 top-24 size-72 rounded-full opacity-40 blur-3xl"
         style={{ background: "radial-gradient(circle, oklch(0.84 0.11 25), transparent 70%)" }}
       />
+
+      {/* Sign out — lets a user switch accounts or fix a wrong login */}
+      {onLogout && (
+        <button
+          type="button"
+          onClick={onLogout}
+          className="absolute right-4 top-4 z-10 flex items-center gap-1.5 rounded-full bg-card/80 px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm ring-1 ring-border backdrop-blur-sm transition active:scale-95"
+        >
+          <LogOut className="size-3.5" />
+          ออกจากระบบ
+        </button>
+      )}
 
       {/* ── Brand zone ── */}
       <div className="relative flex flex-col items-center px-6 pt-14 pb-6">
@@ -427,6 +442,24 @@ function ProfileStep({
   )
 }
 
+/** Height (px) currently covered by the on-screen keyboard, via visualViewport. */
+function useKeyboardInset(): number {
+  const [inset, setInset] = useState(0)
+  useEffect(() => {
+    const vv = typeof window !== "undefined" ? window.visualViewport : null
+    if (!vv) return
+    const update = () => setInset(Math.max(0, window.innerHeight - vv.height - vv.offsetTop))
+    update()
+    vv.addEventListener("resize", update)
+    vv.addEventListener("scroll", update)
+    return () => {
+      vv.removeEventListener("resize", update)
+      vv.removeEventListener("scroll", update)
+    }
+  }, [])
+  return inset
+}
+
 function AvatarStack({ members }: { members: Member[] }) {
   if (members.length === 0) {
     return <span className="text-xs text-muted-foreground/70">ยังไม่มีสมาชิก</span>
@@ -456,10 +489,16 @@ function NameSheet({
   onClose: () => void
   onSubmit: () => void
 }) {
+  // Lift the sheet above the on-screen keyboard on mobile (visualViewport shrinks
+  // when the keyboard opens) so the input + button aren't covered.
+  const kb = useKeyboardInset()
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
       <button type="button" aria-label="ปิด" onClick={onClose} className="absolute inset-0 bg-foreground/30 backdrop-blur-sm" />
-      <div className="relative w-full max-w-md animate-in slide-in-from-bottom-4 fade-in duration-300 rounded-t-[2rem] bg-card p-5 pb-8 shadow-2xl ring-1 ring-border sm:rounded-[2rem]">
+      <div
+        style={{ marginBottom: kb }}
+        className="relative w-full max-w-md animate-in slide-in-from-bottom-4 fade-in duration-300 rounded-t-[2rem] bg-card p-5 pb-8 shadow-2xl ring-1 ring-border transition-[margin] sm:rounded-[2rem]"
+      >
         <div className="mx-auto mb-4 h-1.5 w-10 rounded-full bg-border sm:hidden" />
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold text-foreground">{title}</h2>

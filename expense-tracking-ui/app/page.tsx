@@ -29,6 +29,7 @@ import {
   ensureRoomCode,
   createGroup,
   renameGroup,
+  deleteGroup,
   updateGroupAvatar,
   addMember,
   updateMember,
@@ -433,6 +434,23 @@ export default function Page() {
     renameGroup(group.id, name)
   }
 
+  /** Delete the active group (host only). Cascades members + transactions. */
+  function handleDeleteGroup() {
+    if (!group || readOnly) return
+    // Guard: only the host may delete (also enforced by RLS groups_delete_host).
+    if (!isGuestMode() && !(authUserId && group.hostUserId === authUserId)) return
+    const gid = group.id
+    deleteGroup(gid)
+    setGroups((prev) => prev.filter((g) => g.id !== gid))
+    clearLastContext()
+    // Drop back to the group picker.
+    setMember(null)
+    setGroup(null)
+    setEntryGroupId(null)
+    setEntryStep(null)
+    setTab("home")
+  }
+
   /** Settings: mint (or reveal) the active group's shareable Room Code. */
   async function handleGenerateRoomCode(): Promise<string | null> {
     if (!group || readOnly) return null
@@ -520,6 +538,7 @@ export default function Page() {
         onCreateGroup={handleCreateGroup}
         onAddMember={handleAddMember}
         onCreateProfile={handleAddMember}
+        onLogout={handleLogout}
       />
     )
   }
@@ -641,6 +660,8 @@ export default function Page() {
             onSaveGroupAvatar={handleSaveGroupAvatar}
             onGenerateRoomCode={handleGenerateRoomCode}
             roomCodeEnabled={!isGuestMode() && !!authEmail}
+            onDeleteGroup={handleDeleteGroup}
+            canDeleteGroup={isGuestMode() || (!!authUserId && group.hostUserId === authUserId)}
           />
         )}
       </div>

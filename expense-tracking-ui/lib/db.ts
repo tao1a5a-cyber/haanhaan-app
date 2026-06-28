@@ -194,6 +194,15 @@ export async function renameGroup(groupId: string, name: string) {
   if (error) console.error("renameGroup", error)
 }
 
+/** Delete a group (members/transactions cascade). RLS: host only. */
+export async function deleteGroup(groupId: string) {
+  if (isGuestMode()) return guest.guestDeleteGroup(groupId)
+  const db = tryGetSupabase()
+  if (!db) return
+  const { error } = await db.from("groups").delete().eq("id", groupId)
+  if (error) console.error("deleteGroup", error)
+}
+
 /** Set (or clear with "") the group's avatar image URL. */
 export async function updateGroupAvatar(groupId: string, avatarUrl: string) {
   if (isGuestMode()) return guest.guestUpdateGroupAvatar(groupId, avatarUrl)

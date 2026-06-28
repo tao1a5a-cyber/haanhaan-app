@@ -32,6 +32,10 @@ type Props = {
   onGenerateRoomCode?: () => Promise<string | null>
   /** whether the Room Code feature is available (signed-in, non-guest) */
   roomCodeEnabled?: boolean
+  /** delete the whole group (host only) */
+  onDeleteGroup?: () => void
+  /** whether the current user may delete the group (host / guest-mode owner) */
+  canDeleteGroup?: boolean
   /** read-only guests can view settings but not save changes or manage members */
   readOnly?: boolean
   /** when true, render inline as a tab page instead of a floating modal */
@@ -39,7 +43,7 @@ type Props = {
   onClose?: () => void
 }
 
-export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMember, onRenameGroup, onSaveGroupAvatar, authEmail, authUserId, onClaimMember, onGenerateRoomCode, roomCodeEnabled, readOnly = false, embedded, onClose }: Props) {
+export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMember, onRenameGroup, onSaveGroupAvatar, authEmail, authUserId, onClaimMember, onGenerateRoomCode, roomCodeEnabled, onDeleteGroup, canDeleteGroup = false, readOnly = false, embedded, onClose }: Props) {
   const [name, setName] = useState(member.name)
   const [avatar, setAvatar] = useState(member.avatar)
   const [avatarBlob, setAvatarBlob] = useState<Blob | null>(null)
@@ -64,6 +68,10 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
 
   const [groupName, setGroupName] = useState(group.name)
   const [newMember, setNewMember] = useState("")
+
+  // Delete-group confirmation (type the group name to confirm).
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState("")
 
   const [themeMode, toggleTheme] = useThemeMode()
 
@@ -468,6 +476,54 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                     >
                       <Check className="size-4" />
                     </button>
+                  </div>
+                )}
+
+                {/* Danger zone — delete the whole group (host only) */}
+                {canDeleteGroup && !readOnly && (
+                  <div className="mt-5 border-t border-border pt-4">
+                    {!confirmingDelete ? (
+                      <button
+                        type="button"
+                        onClick={() => { setConfirmingDelete(true); setDeleteConfirm("") }}
+                        className="flex w-full items-center justify-center gap-2 rounded-xl bg-destructive/10 py-3 text-sm font-semibold text-destructive transition active:scale-[0.98]"
+                      >
+                        <Trash2 className="size-4" />
+                        ลบกลุ่มนี้
+                      </button>
+                    ) : (
+                      <div className="rounded-xl bg-destructive/8 p-3 ring-1 ring-destructive/30">
+                        <p className="text-xs leading-relaxed text-foreground">
+                          การลบจะลบ <span className="font-semibold">กลุ่ม สมาชิก และรายการทั้งหมด</span> อย่างถาวร กู้คืนไม่ได้
+                        </p>
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          พิมพ์ชื่อกลุ่ม “<span className="font-semibold text-foreground">{group.name}</span>” เพื่อยืนยัน
+                        </p>
+                        <input
+                          value={deleteConfirm}
+                          onChange={(e) => setDeleteConfirm(e.target.value)}
+                          placeholder={group.name}
+                          className="mt-2 w-full rounded-lg bg-secondary px-3 py-2 text-sm text-foreground shadow-[inset_0_1px_2px_rgba(0,0,0,0.22)] outline-none ring-1 ring-transparent transition placeholder:text-muted-foreground focus:ring-destructive"
+                        />
+                        <div className="mt-3 flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => { setConfirmingDelete(false); setDeleteConfirm("") }}
+                            className="flex-1 rounded-lg bg-secondary py-2.5 text-sm font-semibold text-foreground ring-1 ring-border transition active:scale-[0.98]"
+                          >
+                            ยกเลิก
+                          </button>
+                          <button
+                            type="button"
+                            disabled={deleteConfirm.trim() !== group.name}
+                            onClick={() => onDeleteGroup?.()}
+                            className="flex-1 rounded-lg bg-destructive py-2.5 text-sm font-semibold text-destructive-foreground transition active:scale-[0.98] disabled:opacity-40"
+                          >
+                            ลบถาวร
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </SectionCard>
