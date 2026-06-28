@@ -52,7 +52,7 @@ export function BottomNav({
   }
 
   return (
-    <nav className="sticky bottom-0 z-50 border-t border-border bg-card/85 px-6 pb-6 pt-2.5 backdrop-blur-md">
+    <nav className="sticky bottom-0 z-40 border-t border-border bg-card/85 px-6 pb-6 pt-2.5 backdrop-blur-md">
       <div className="relative flex items-center">
         <div className="flex flex-1 items-center justify-around">
           {leftTabs.map((t) => (

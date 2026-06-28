@@ -657,9 +657,9 @@ export default function Page() {
             type="button"
             aria-label="ปิด"
             onClick={() => setShowAddForm(false)}
-            className="fixed inset-0 z-30 bg-foreground/40 backdrop-blur-sm animate-in fade-in duration-200"
+            className="fixed inset-0 z-20 bg-foreground/40 backdrop-blur-sm animate-in fade-in duration-200"
           />
-          <div className="pointer-events-none fixed inset-x-0 bottom-28 z-40 mx-auto flex w-full max-w-md justify-center px-3">
+          <div className="pointer-events-none fixed inset-x-0 bottom-28 z-30 mx-auto flex w-full max-w-md justify-center px-3">
             <div className="pointer-events-auto relative w-full origin-bottom animate-in zoom-in-95 fade-in duration-200">
               <div className="relative z-10 flex max-h-[64vh] w-full flex-col overflow-hidden rounded-[1.8rem] bg-background shadow-2xl ring-1 ring-border">
                 <div className="flex shrink-0 items-center justify-end px-3 pt-3">
