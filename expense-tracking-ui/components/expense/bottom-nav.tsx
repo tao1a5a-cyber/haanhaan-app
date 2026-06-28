@@ -15,14 +15,14 @@ export function BottomNav({
   active,
   onChange,
   onAdd,
-  canAdd = true,
+  addOpen = false,
 }: {
   active: string
   onChange: (id: string) => void
-  /** open the quick-add bottom sheet */
+  /** toggle the quick-add popup */
   onAdd: () => void
-  /** when false (read-only guests), the central "+" FAB is hidden */
-  canAdd?: boolean
+  /** whether the quick-add popup is currently open (drives the FAB state) */
+  addOpen?: boolean
 }) {
   function Tab({ id, label, icon: Icon }: { id: string; label: string; icon: typeof Home }) {
     const isActive = active === id
@@ -52,7 +52,7 @@ export function BottomNav({
   }
 
   return (
-    <nav className="sticky bottom-0 z-20 border-t border-border bg-card/85 px-6 pb-6 pt-2.5 backdrop-blur-md">
+    <nav className="sticky bottom-0 z-50 border-t border-border bg-card/85 px-6 pb-6 pt-2.5 backdrop-blur-md">
       <div className="relative flex items-center">
         <div className="flex flex-1 items-center justify-around">
           {leftTabs.map((t) => (
@@ -69,18 +69,17 @@ export function BottomNav({
           ))}
         </div>
 
-        {/* Prominent floating "+" — always accessible without scrolling.
-            Hidden for read-only guests who can't add transactions. */}
-        {canAdd && (
-          <button
-            type="button"
-            onClick={onAdd}
-            aria-label="เพิ่มรายการ"
-            className="absolute -top-9 left-1/2 grid size-16 -translate-x-1/2 place-items-center overflow-hidden rounded-full bg-accent text-accent-foreground shadow-[0_10px_24px_-6px_oklch(0.3_0.04_55/0.6)] ring-4 ring-card transition active:scale-95"
-          >
-            <img src="/goose.png" alt="" className="size-[4.2rem] object-contain" />
-          </button>
-        )}
+        {/* Prominent floating Goose — taps toggle the quick-add popup.
+            Stays fully visible above the popup's backdrop. */}
+        <button
+          type="button"
+          onClick={onAdd}
+          aria-label={addOpen ? "ปิดเพิ่มรายการ" : "เพิ่มรายการ"}
+          aria-expanded={addOpen}
+          className={`absolute -top-9 left-1/2 grid size-16 -translate-x-1/2 place-items-center overflow-hidden rounded-full bg-accent text-accent-foreground shadow-[0_10px_24px_-6px_oklch(0.3_0.04_55/0.6)] ring-4 ring-card transition active:scale-95 ${addOpen ? "scale-95 brightness-95" : ""}`}
+        >
+          <img src="/goose.png" alt="" className="size-[4.2rem] object-contain" />
+        </button>
       </div>
     </nav>
   )

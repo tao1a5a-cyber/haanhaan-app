@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Image from "next/image"
-import { ChevronLeft, Plus, Users, ArrowRight, X, UserPlus, Camera, Check, Eye, LogIn, LogOut } from "lucide-react"
+import { ChevronLeft, Plus, Users, ArrowRight, X, UserPlus, Camera, Check, Lock, LogOut } from "lucide-react"
 import { MemberAvatar } from "./member-avatar"
 import { GroupAvatar } from "./group-avatar"
 import { AvatarWheel } from "./avatar-wheel"
@@ -24,10 +24,10 @@ type Props = {
   initialGroupId?: string | null
   /** override the starting step (e.g. "profile" right after joining via a code) */
   initialStep?: Step | null
-  /** anonymous room guests are read-only — they see a sign-in prompt, not a form */
-  readOnly?: boolean
   /** signed-in account email (null for guests) — shown in the profile intro */
   authEmail?: string | null
+  /** current auth user id — used to lock profiles already claimed by others */
+  authUserId?: string | null
   onEnter: (group: Group, member: Member) => void
   onCreateGroup: (name: string) => Promise<Group | null>
   onAddMember: (groupId: string, draft: { name: string }) => Promise<Member | null>
@@ -41,8 +41,8 @@ export function EntryScreen({
   groups,
   initialGroupId,
   initialStep,
-  readOnly = false,
   authEmail,
+  authUserId,
   onEnter,
   onCreateGroup,
   onAddMember,
@@ -75,8 +75,13 @@ export function EntryScreen({
     setStep("member")
   }
 
+  /** A profile claimed by another account is locked — only its owner may enter. */
+  function isLocked(m: Member): boolean {
+    return !!m.userId && m.userId !== authUserId
+  }
+
   function pickMember(m: Member) {
-    if (!selected) return
+    if (!selected || isLocked(m)) return
     setLeaving(m.id)
     setTimeout(() => onEnter(selected, m), 280)
   }
@@ -225,49 +230,60 @@ export function EntryScreen({
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              {(selected?.members ?? []).map((m) => (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => pickMember(m)}
-                  className="flex flex-col items-center gap-2.5 overflow-hidden rounded-[1.4rem] bg-card p-4 shadow-sm ring-1 ring-border transition active:scale-[0.97] hover:ring-accent/40"
-                  style={{
-                    transform: leaving === m.id ? "scale(1.04)" : undefined,
-                    opacity: leaving && leaving !== m.id ? 0.4 : 1,
-                    transition: "transform 220ms ease, opacity 220ms ease",
-                  }}
-                >
-                  <MemberAvatar member={m} size={72} className="shadow-sm ring-1 ring-border" />
-                  <span className="line-clamp-1 text-sm font-bold text-foreground">{m.name}</span>
-                </button>
-              ))}
+              {(selected?.members ?? []).map((m) => {
+                const locked = isLocked(m)
+                const mine = !!m.userId && m.userId === authUserId
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => pickMember(m)}
+                    disabled={locked}
+                    aria-disabled={locked}
+                    className={`relative flex flex-col items-center gap-2.5 overflow-hidden rounded-[1.4rem] bg-card p-4 shadow-sm ring-1 ring-border transition ${
+                      locked ? "cursor-not-allowed opacity-55" : "active:scale-[0.97] hover:ring-accent/40"
+                    }`}
+                    style={{
+                      transform: leaving === m.id ? "scale(1.04)" : undefined,
+                      opacity: leaving && leaving !== m.id ? 0.4 : undefined,
+                      transition: "transform 220ms ease, opacity 220ms ease",
+                    }}
+                  >
+                    <div className="relative">
+                      <MemberAvatar member={m} size={72} className="shadow-sm ring-1 ring-border" />
+                      {locked && (
+                        <span className="absolute -bottom-1 -right-1 grid size-7 place-items-center rounded-full bg-foreground/75 text-background ring-2 ring-card">
+                          <Lock className="size-3.5" />
+                        </span>
+                      )}
+                      {mine && (
+                        <span className="absolute -bottom-1 -right-1 grid size-7 place-items-center rounded-full bg-accent text-accent-foreground ring-2 ring-card">
+                          <Check className="size-3.5" />
+                        </span>
+                      )}
+                    </div>
+                    <span className="line-clamp-1 text-sm font-bold text-foreground">{m.name}</span>
+                    {locked && <span className="text-[10px] font-medium text-muted-foreground">ผูกอีเมลแล้ว</span>}
+                  </button>
+                )
+              })}
 
-              {/* Read-only room guests can't add members — only pick an existing one to view as. */}
-              {!readOnly && (
-                <button
-                  type="button"
-                  onClick={() => { setDraftName(""); setAddingMember(true) }}
-                  className="flex flex-col items-center justify-center gap-2.5 rounded-[1.4rem] border border-dashed border-accent/40 bg-accent/8 p-4 text-accent transition active:scale-[0.97]"
-                >
-                  <span className="grid size-[72px] place-items-center rounded-full bg-accent/12">
-                    <UserPlus className="size-7" />
-                  </span>
-                  <span className="text-sm font-semibold">เพิ่มสมาชิก</span>
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => { setDraftName(""); setAddingMember(true) }}
+                className="flex flex-col items-center justify-center gap-2.5 rounded-[1.4rem] border border-dashed border-accent/40 bg-accent/8 p-4 text-accent transition active:scale-[0.97]"
+              >
+                <span className="grid size-[72px] place-items-center rounded-full bg-accent/12">
+                  <UserPlus className="size-7" />
+                </span>
+                <span className="text-sm font-semibold">เพิ่มสมาชิก</span>
+              </button>
             </div>
-
-            {readOnly && (
-              <p className="mt-4 rounded-2xl bg-secondary/60 px-4 py-3 text-center text-xs leading-relaxed text-muted-foreground">
-                เลือกสมาชิกเพื่อดูข้อมูลแบบอ่านอย่างเดียว · เข้าสู่ระบบเพื่อเพิ่ม/แก้ไขรายการ
-              </p>
-            )}
           </>
         ) : (
           /* ── Profile step ── */
           <ProfileStep
             group={selected}
-            readOnly={readOnly}
             authEmail={authEmail}
             name={profileName}
             avatar={profileAvatar}
@@ -277,7 +293,6 @@ export function EntryScreen({
             onNameChange={setProfileName}
             onPickAvatar={() => setShowWheel(true)}
             onSubmit={submitProfile}
-            onViewReadOnly={() => setStep("member")}
           />
         )}
         </div>
@@ -312,11 +327,10 @@ export function EntryScreen({
 
 /** "Create your profile" screen — host flow after creating a group, or a joiner. */
 function ProfileStep({
-  group, readOnly, authEmail, name, avatar, busy, canGoBack,
-  onBack, onNameChange, onPickAvatar, onSubmit, onViewReadOnly,
+  group, authEmail, name, avatar, busy, canGoBack,
+  onBack, onNameChange, onPickAvatar, onSubmit,
 }: {
   group: Group | null
-  readOnly: boolean
   authEmail?: string | null
   name: string
   avatar: string
@@ -326,51 +340,7 @@ function ProfileStep({
   onNameChange: (v: string) => void
   onPickAvatar: () => void
   onSubmit: () => void
-  onViewReadOnly: () => void
 }) {
-  // Read-only room guests can't create a profile (writes are blocked) — invite
-  // them to sign in, or browse the group's data without editing.
-  if (readOnly) {
-    return (
-      <div className="flex flex-col">
-        <div className="mb-5">
-          <h1 className="text-xl font-bold text-foreground">ยินดีต้อนรับ</h1>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {group?.name ? `เข้าร่วม “${group.name}” แล้ว` : "เข้าร่วมกลุ่มแล้ว"}
-          </p>
-        </div>
-
-        <div className="rounded-[1.4rem] bg-card p-5 text-center shadow-sm ring-1 ring-border">
-          <span className="mx-auto grid size-14 place-items-center rounded-full bg-accent/12 text-accent">
-            <Eye className="size-6" />
-          </span>
-          <p className="mt-3 text-sm font-semibold text-foreground">โหมดอ่านอย่างเดียว</p>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            คุณดูข้อมูลของกลุ่มนี้ได้ แต่ยังเพิ่มหรือแก้ไขรายการไม่ได้
-            เข้าสู่ระบบและสร้างโปรไฟล์เพื่อปลดล็อกการแก้ไข
-          </p>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => { window.location.href = "/login" }}
-          className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-primary py-3.5 text-sm font-semibold text-primary-foreground shadow-sm transition active:scale-[0.99]"
-        >
-          <LogIn className="size-4" />
-          เข้าสู่ระบบเพื่อสร้างโปรไฟล์
-        </button>
-        <button
-          type="button"
-          onClick={onViewReadOnly}
-          className="mt-2.5 flex w-full items-center justify-center gap-2 rounded-2xl bg-secondary py-3.5 text-sm font-semibold text-foreground ring-1 ring-border transition active:scale-[0.99]"
-        >
-          <Eye className="size-4" />
-          ดูข้อมูลแบบอ่านอย่างเดียว
-        </button>
-      </div>
-    )
-  }
-
   return (
     <div className="flex flex-col">
       <div className="mb-5 flex items-center gap-2">

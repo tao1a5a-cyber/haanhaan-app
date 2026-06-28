@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { X, Eye } from "lucide-react"
+import { X } from "lucide-react"
 import { AppHeader } from "@/components/expense/app-header"
 import { BalanceCard } from "@/components/expense/balance-card"
 import { AddTransaction } from "@/components/expense/add-transaction"
@@ -88,9 +88,6 @@ export default function Page() {
   // when re-entering after a fresh join, start EntryScreen on a specific step
   const [entryStep, setEntryStep] = useState<"group" | "member" | "profile" | null>(null)
   const [themeMode] = useThemeMode()
-
-  // Anonymous room guests may browse but not write; lifted once they authenticate.
-  const readOnly = authIsAnonymous
 
   // ── Auth gate: send unauthenticated visitors to /login ─────
   // Also drives the header's signed-in email indicator + identity binding.
@@ -264,7 +261,7 @@ export default function Page() {
     tx: Omit<Transaction, "id" | "createdAt" | "payerId" | "groupId">,
     slipFile?: File,
   ) {
-    if (!group || !member || readOnly) return
+    if (!group || !member) return
 
     // Guest mode is capped — nudge to the cloud once the local limit is hit.
     if (isGuestMode() && guestTransactionCount() >= GUEST_TX_LIMIT) {
@@ -300,13 +297,11 @@ export default function Page() {
   }
 
   function handleEdit(updated: Transaction) {
-    if (readOnly) return
     setTransactions((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
     updateTransaction(updated)
   }
 
   function handleDelete(txId: string) {
-    if (readOnly) return
     setTransactions((prev) => prev.filter((t) => t.id !== txId))
     deleteTransaction(txId)
   }
@@ -319,7 +314,7 @@ export default function Page() {
   }
 
   function handleConfirmSettle() {
-    if (!group || !member || readOnly) return
+    if (!group || !member) return
     setTransactions((prev) => prev.map((t) => ({ ...t, settled: true })))
     setShowSettlement(false)
     settleAllTransactions(group.id)
@@ -357,6 +352,9 @@ export default function Page() {
     const m = await addMember(groupId, { name: draft.name, avatar: draft.avatar, ...defaults })
     if (!m) return null
     setGroups((prev) => prev.map((x) => (x.id === groupId ? { ...x, members: [...x.members, m] } : x)))
+    // Also update the active group so Settings (which reads `group`) shows the
+    // new member instantly without a refresh.
+    setGroup((prev) => (prev && prev.id === groupId ? { ...prev, members: [...prev.members, m] } : prev))
     return m
   }
 
@@ -370,7 +368,7 @@ export default function Page() {
 
   /** Settings: assign my email to a chosen member, moving it off any previous one. */
   function handleClaimMember(memberId: string) {
-    if (!authUserId || !group || readOnly) return
+    if (!authUserId || !group) return
     const prev = group.members.find((m) => m.userId === authUserId)
     if (prev && prev.id !== memberId) {
       releaseMember(prev.id)
@@ -407,19 +405,19 @@ export default function Page() {
   }
 
   function handleSettingsSave(updated: Partial<Member>, pinHash?: string | null) {
-    if (!member || readOnly) return
+    if (!member) return
     setMember((prev) => (prev ? { ...prev, ...updated } : prev))
     applyMemberUpdate(member.id, updated)
     updateMember(member.id, updated, pinHash)
   }
 
   async function handleAddGroupMember(name: string) {
-    if (!group || readOnly) return
+    if (!group) return
     await handleAddMember(group.id, { name })
   }
 
   function handleRemoveMember(memberId: string) {
-    if (!group || readOnly) return
+    if (!group) return
     setGroups((prev) =>
       prev.map((g) => (g.id === group.id ? { ...g, members: g.members.filter((m) => m.id !== memberId) } : g)),
     )
@@ -428,7 +426,7 @@ export default function Page() {
   }
 
   function handleRenameGroup(name: string) {
-    if (!group || readOnly) return
+    if (!group) return
     setGroups((prev) => prev.map((g) => (g.id === group.id ? { ...g, name } : g)))
     setGroup((prev) => (prev ? { ...prev, name } : prev))
     renameGroup(group.id, name)
@@ -436,7 +434,7 @@ export default function Page() {
 
   /** Delete the active group (host only). Cascades members + transactions. */
   function handleDeleteGroup() {
-    if (!group || readOnly) return
+    if (!group) return
     // Guard: only the host may delete (also enforced by RLS groups_delete_host).
     if (!isGuestMode() && !(authUserId && group.hostUserId === authUserId)) return
     const gid = group.id
@@ -453,7 +451,7 @@ export default function Page() {
 
   /** Settings: mint (or reveal) the active group's shareable Room Code. */
   async function handleGenerateRoomCode(): Promise<string | null> {
-    if (!group || readOnly) return null
+    if (!group) return null
     const code = await ensureRoomCode(group.id, group.roomCode)
     if (code) {
       setGroups((prev) => prev.map((g) => (g.id === group.id ? { ...g, roomCode: code } : g)))
@@ -463,7 +461,7 @@ export default function Page() {
   }
 
   function handleSaveGroupAvatar(avatarUrl: string) {
-    if (!group || readOnly) return
+    if (!group) return
     setGroups((prev) => prev.map((g) => (g.id === group.id ? { ...g, avatar: avatarUrl } : g)))
     setGroup((prev) => (prev ? { ...prev, avatar: avatarUrl } : prev))
     updateGroupAvatar(group.id, avatarUrl)
@@ -532,8 +530,8 @@ export default function Page() {
         groups={groups}
         initialGroupId={entryGroupId}
         initialStep={entryStep}
-        readOnly={readOnly}
         authEmail={authEmail}
+        authUserId={authUserId}
         onEnter={enterAs}
         onCreateGroup={handleCreateGroup}
         onAddMember={handleAddMember}
@@ -577,24 +575,6 @@ export default function Page() {
               onMarkAllRead={handleMarkAllRead}
             />
             <div className="space-y-5 pt-2">
-              {readOnly && (
-                <div className="mx-5 flex items-center gap-3 rounded-[1.4rem] bg-accent/10 p-4 ring-1 ring-accent/25">
-                  <span className="grid size-9 shrink-0 place-items-center rounded-full bg-accent/15 text-accent">
-                    <Eye className="size-[18px]" />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-foreground">โหมดอ่านอย่างเดียว</p>
-                    <p className="text-xs text-muted-foreground">เข้าสู่ระบบเพื่อเพิ่มและแก้ไขรายการ</p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => { window.location.href = "/login" }}
-                    className="shrink-0 rounded-full bg-accent px-3.5 py-2 text-xs font-semibold text-accent-foreground transition active:scale-95"
-                  >
-                    เข้าสู่ระบบ
-                  </button>
-                </div>
-              )}
               <BalanceCard
                 net={net}
                 members={group.members}
@@ -637,7 +617,6 @@ export default function Page() {
             categories={allCategories}
             members={group.members}
             currentMember={member}
-            readOnly={readOnly}
             onEdit={handleEdit}
             onDelete={handleDelete}
             onNotify={notifyOthers}
@@ -649,7 +628,6 @@ export default function Page() {
             embedded
             group={group}
             member={member}
-            readOnly={readOnly}
             authEmail={authEmail}
             authUserId={authUserId}
             onClaimMember={handleClaimMember}
@@ -666,40 +644,44 @@ export default function Page() {
         )}
       </div>
 
-      <BottomNav active={tab} onChange={setTab} canAdd={!readOnly} onAdd={() => setShowAddForm(true)} />
+      <BottomNav active={tab} onChange={setTab} addOpen={showAddForm} onAdd={() => setShowAddForm((v) => !v)} />
 
-      {/* One-click add: the FAB opens the expense form directly */}
+      {/* Quick-add: a floating popup that scales up out of the Goose FAB.
+          The bottom nav (z-50) + Goose stay visible above the dimmed backdrop. */}
       {showAddForm && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center">
+        <>
           <button
             type="button"
             aria-label="ปิด"
             onClick={() => setShowAddForm(false)}
-            className="absolute inset-0 bg-foreground/30 backdrop-blur-sm"
+            className="fixed inset-0 z-30 bg-foreground/40 backdrop-blur-sm animate-in fade-in duration-200"
           />
-          <div className="relative max-h-[90vh] w-full max-w-md overflow-y-auto rounded-t-[2rem] bg-background pb-4 shadow-2xl ring-1 ring-border animate-in slide-in-from-bottom-4 fade-in duration-300 sm:rounded-[2rem]">
-            <div className="sticky top-0 z-10 flex items-center justify-between bg-background/90 px-5 pb-2 pt-4 backdrop-blur-sm">
-              <div className="absolute left-1/2 top-1.5 h-1.5 w-10 -translate-x-1/2 rounded-full bg-border sm:hidden" />
-              <h2 className="text-base font-semibold text-foreground">เพิ่มรายการ</h2>
-              <button
-                type="button"
-                onClick={() => setShowAddForm(false)}
-                aria-label="ปิด"
-                className="grid size-8 place-items-center rounded-full bg-secondary text-muted-foreground transition active:scale-90"
-              >
-                <X className="size-4" />
-              </button>
+          <div className="pointer-events-none fixed inset-x-0 bottom-28 z-40 mx-auto flex w-full max-w-md justify-center px-3">
+            <div className="pointer-events-auto flex max-h-[64vh] w-full origin-bottom animate-in zoom-in-95 fade-in flex-col overflow-hidden rounded-[1.8rem] bg-background shadow-2xl ring-1 ring-border duration-200">
+              <div className="flex shrink-0 items-center justify-between border-b border-border bg-background/90 px-5 py-3 backdrop-blur-sm">
+                <h2 className="text-base font-semibold text-foreground">เพิ่มรายการ</h2>
+                <button
+                  type="button"
+                  onClick={() => setShowAddForm(false)}
+                  aria-label="ปิด"
+                  className="grid size-8 place-items-center rounded-full bg-secondary text-muted-foreground transition active:scale-90"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+              <div className="overflow-y-auto">
+                <AddTransaction
+                  categories={allCategories}
+                  members={group.members}
+                  currentMember={member}
+                  onAdd={handleAdd}
+                  onAddCategory={handleAddCategory}
+                  onSubmitted={() => setShowAddForm(false)}
+                />
+              </div>
             </div>
-            <AddTransaction
-              categories={allCategories}
-              members={group.members}
-              currentMember={member}
-              onAdd={handleAdd}
-              onAddCategory={handleAddCategory}
-              onSubmitted={() => setShowAddForm(false)}
-            />
           </div>
-        </div>
+        </>
       )}
 
       {showSettlement && (
@@ -709,7 +691,6 @@ export default function Page() {
           members={group.members}
           currentMemberId={member.id}
           balances={balances}
-          readOnly={readOnly}
           onConfirm={handleConfirmSettle}
           onClose={() => setShowSettlement(false)}
         />

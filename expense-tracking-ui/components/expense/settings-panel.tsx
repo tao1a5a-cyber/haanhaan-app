@@ -1,7 +1,7 @@
 "use client"
 
 import { useRef, useState } from "react"
-import { X, Eye, EyeOff, Camera, Loader2, UserCog, Users, Palette, Lock, Trash2, UserPlus, Check, ImagePlus, KeyRound, Copy, Sun, Moon, ChevronDown } from "lucide-react"
+import { X, Eye, EyeOff, Camera, Loader2, UserCog, Users, Palette, Lock, Trash2, UserPlus, Check, ImagePlus, KeyRound, Copy, Sun, Moon, ChevronDown, Mail } from "lucide-react"
 import { useThemeMode } from "@/lib/theme"
 import { isCustomAvatar } from "./users"
 import { MemberAvatar } from "./member-avatar"
@@ -36,14 +36,12 @@ type Props = {
   onDeleteGroup?: () => void
   /** whether the current user may delete the group (host / guest-mode owner) */
   canDeleteGroup?: boolean
-  /** read-only guests can view settings but not save changes or manage members */
-  readOnly?: boolean
   /** when true, render inline as a tab page instead of a floating modal */
   embedded?: boolean
   onClose?: () => void
 }
 
-export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMember, onRenameGroup, onSaveGroupAvatar, authEmail, authUserId, onClaimMember, onGenerateRoomCode, roomCodeEnabled, onDeleteGroup, canDeleteGroup = false, readOnly = false, embedded, onClose }: Props) {
+export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMember, onRenameGroup, onSaveGroupAvatar, authEmail, authUserId, onClaimMember, onGenerateRoomCode, roomCodeEnabled, onDeleteGroup, canDeleteGroup = false, embedded, onClose }: Props) {
   const [name, setName] = useState(member.name)
   const [avatar, setAvatar] = useState(member.avatar)
   const [avatarBlob, setAvatarBlob] = useState<Blob | null>(null)
@@ -232,14 +230,6 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
     <>
       {header}
       <div className={embedded ? "space-y-4 px-5 pb-10 pt-1" : "max-h-[74vh] space-y-4 overflow-y-auto px-5 py-5 pb-8"}>
-          {readOnly && (
-            <div className="rounded-[1.4rem] bg-accent/10 p-4 text-center ring-1 ring-accent/25">
-              <p className="text-sm font-semibold text-foreground">โหมดอ่านอย่างเดียว</p>
-              <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                เข้าสู่ระบบเพื่อแก้ไขโปรไฟล์และจัดการสมาชิก
-              </p>
-            </div>
-          )}
           {section === "main" && (
             <>
               {/* ── Profile section ── */}
@@ -432,16 +422,17 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                         {mine && <span className="ml-1.5 rounded-full bg-accent/15 px-2 py-0.5 text-[10px] font-medium text-accent">บัญชีของคุณ</span>}
                         {claimedByOther && <span className="ml-1.5 rounded-full bg-card px-2 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-border">ผูกอีเมลแล้ว</span>}
                       </span>
-                      {!readOnly && authUserId && !mine && !claimedByOther && onClaimMember && (
+                      {authUserId && !mine && !claimedByOther && onClaimMember && (
                         <button
                           type="button"
                           onClick={() => onClaimMember(m.id)}
-                          className="shrink-0 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground transition active:scale-95"
+                          className="flex shrink-0 items-center gap-1 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-accent-foreground transition active:scale-95"
                         >
-                          นี่คือฉัน
+                          <Mail className="size-3" />
+                          ผูกอีเมล
                         </button>
                       )}
-                      {!readOnly && m.id !== member.id && (
+                      {m.id !== member.id && (
                         <button
                           type="button"
                           onClick={() => onRemoveMember(m.id)}
@@ -456,8 +447,7 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                   })}
                 </ul>
 
-                {!readOnly && (
-                  <div className="mt-3 flex items-center gap-2">
+                <div className="mt-3 flex items-center gap-2">
                     <div className="flex flex-1 items-center gap-2 rounded-xl bg-secondary px-3 py-2 shadow-[inset_0_1px_2px_rgba(0,0,0,0.22)] ring-1 ring-transparent focus-within:ring-accent">
                       <UserPlus className="size-4 text-accent" />
                       <input
@@ -477,10 +467,9 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                       <Check className="size-4" />
                     </button>
                   </div>
-                )}
 
                 {/* Danger zone — delete the whole group (host only) */}
-                {canDeleteGroup && !readOnly && (
+                {canDeleteGroup && (
                   <div className="mt-5 border-t border-border pt-4">
                     {!confirmingDelete ? (
                       <button
@@ -563,18 +552,16 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                 </SectionCard>
               )}
 
-              {/* Save — hidden for read-only guests (changes can't be persisted) */}
-              {!readOnly && (
-                <button
-                  type="button"
-                  onClick={handleSave}
-                  disabled={uploading}
-                  className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary py-3.5 text-sm font-semibold text-primary-foreground shadow-sm transition active:scale-[0.98] disabled:opacity-60"
-                >
-                  {uploading && <Loader2 className="size-4 animate-spin" />}
-                  {uploading ? "กำลังบันทึก..." : "บันทึกการตั้งค่า"}
-                </button>
-              )}
+              {/* Save */}
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={uploading}
+                className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary py-3.5 text-sm font-semibold text-primary-foreground shadow-sm transition active:scale-[0.98] disabled:opacity-60"
+              >
+                {uploading && <Loader2 className="size-4 animate-spin" />}
+                {uploading ? "กำลังบันทึก..." : "บันทึกการตั้งค่า"}
+              </button>
             </>
           )}
 

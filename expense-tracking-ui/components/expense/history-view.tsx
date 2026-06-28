@@ -42,7 +42,6 @@ export function HistoryView({
   categories,
   members,
   currentMember,
-  readOnly = false,
   onEdit,
   onDelete,
   onNotify,
@@ -51,8 +50,6 @@ export function HistoryView({
   categories: Category[]
   members: Member[]
   currentMember: Member
-  /** read-only guests can browse history but not edit/delete */
-  readOnly?: boolean
   onEdit: (tx: Transaction) => void
   onDelete: (txId: string) => void
   onNotify: (message: string, type: AppNotification["type"], txId?: string) => void
@@ -273,29 +270,25 @@ export function HistoryView({
                             </p>
                           </div>
                           <div className="flex items-center gap-1 shrink-0">
-                            <p className={`text-sm font-bold tabular-nums text-foreground ${readOnly ? "mr-1.5" : "mr-1"}`}>
+                            <p className="mr-1 text-sm font-bold tabular-nums text-foreground">
                               ฿{formatBaht(t.amount)}
                             </p>
-                            {!readOnly && (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => startEdit(t)}
-                                  aria-label="แก้ไข"
-                                  className="grid size-8 place-items-center rounded-full text-muted-foreground transition hover:bg-secondary active:scale-90"
-                                >
-                                  <Pencil className="size-3.5" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setConfirmDelete(t.id)}
-                                  aria-label="ลบ"
-                                  className="grid size-8 place-items-center rounded-full text-muted-foreground transition hover:bg-secondary hover:text-destructive active:scale-90"
-                                >
-                                  <Trash2 className="size-3.5" />
-                                </button>
-                              </>
-                            )}
+                            <button
+                              type="button"
+                              onClick={() => startEdit(t)}
+                              aria-label="แก้ไข"
+                              className="grid size-8 place-items-center rounded-full text-muted-foreground transition hover:bg-secondary active:scale-90"
+                            >
+                              <Pencil className="size-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDelete(t.id)}
+                              aria-label="ลบ"
+                              className="grid size-8 place-items-center rounded-full text-muted-foreground transition hover:bg-secondary hover:text-destructive active:scale-90"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </button>
                           </div>
                         </div>
 

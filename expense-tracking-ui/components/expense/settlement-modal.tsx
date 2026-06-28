@@ -29,14 +29,12 @@ type Props = {
   members: Member[]
   currentMemberId: string
   balances: Record<string, number>
-  /** read-only guests can view the summary but not confirm settlement */
-  readOnly?: boolean
   onConfirm: () => void
   onClose: () => void
 }
 
 export function SettlementModal({
-  transactions, categories, members, currentMemberId, balances, readOnly = false, onConfirm, onClose,
+  transactions, categories, members, currentMemberId, balances, onConfirm, onClose,
 }: Props) {
   const unsettled = useMemo(() => transactions.filter((t) => !t.settled), [transactions])
   const memberById = useMemo(() => new Map(members.map((m) => [m.id, m])), [members])
@@ -278,16 +276,14 @@ export function SettlementModal({
           )}
         </div>
 
-        <div className={`grid shrink-0 gap-3 border-t border-border px-5 py-4 ${readOnly ? "grid-cols-1" : "grid-cols-2"}`}>
+        <div className="grid shrink-0 grid-cols-2 gap-3 border-t border-border px-5 py-4">
           <button type="button" onClick={onClose} className="rounded-2xl bg-secondary py-3.5 text-sm font-semibold text-foreground ring-1 ring-border transition active:scale-[0.99]">
-            {readOnly ? "ปิด" : "ยกเลิก"}
+            ยกเลิก
           </button>
-          {!readOnly && (
-            <button type="button" onClick={onConfirm} className="flex items-center justify-center gap-2 rounded-2xl bg-accent py-3.5 text-sm font-semibold text-accent-foreground shadow-sm transition active:scale-[0.99]">
-              <Check className="size-4" />
-              ยืนยันเคลียร์ยอด
-            </button>
-          )}
+          <button type="button" onClick={onConfirm} className="flex items-center justify-center gap-2 rounded-2xl bg-accent py-3.5 text-sm font-semibold text-accent-foreground shadow-sm transition active:scale-[0.99]">
+            <Check className="size-4" />
+            ยืนยันเคลียร์ยอด
+          </button>
         </div>
       </div>
     </div>
