@@ -418,6 +418,8 @@ export default function Page() {
 
   function handleRemoveMember(memberId: string) {
     if (!group) return
+    // Only the Host may remove members from the house.
+    if (!isGuestMode() && !(authUserId && group.hostUserId === authUserId)) return
     setGroups((prev) =>
       prev.map((g) => (g.id === group.id ? { ...g, members: g.members.filter((m) => m.id !== memberId) } : g)),
     )
@@ -640,6 +642,7 @@ export default function Page() {
             roomCodeEnabled={!isGuestMode() && !!authEmail}
             onDeleteGroup={handleDeleteGroup}
             canDeleteGroup={isGuestMode() || (!!authUserId && group.hostUserId === authUserId)}
+            isHost={isGuestMode() || (!!authUserId && group.hostUserId === authUserId)}
           />
         )}
       </div>

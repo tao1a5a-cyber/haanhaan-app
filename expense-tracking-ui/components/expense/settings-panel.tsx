@@ -36,12 +36,14 @@ type Props = {
   onDeleteGroup?: () => void
   /** whether the current user may delete the group (host / guest-mode owner) */
   canDeleteGroup?: boolean
+  /** whether the current user is the Host (only the Host may remove members) */
+  isHost?: boolean
   /** when true, render inline as a tab page instead of a floating modal */
   embedded?: boolean
   onClose?: () => void
 }
 
-export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMember, onRenameGroup, onSaveGroupAvatar, authEmail, authUserId, onClaimMember, onGenerateRoomCode, roomCodeEnabled, onDeleteGroup, canDeleteGroup = false, embedded, onClose }: Props) {
+export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMember, onRenameGroup, onSaveGroupAvatar, authEmail, authUserId, onClaimMember, onGenerateRoomCode, roomCodeEnabled, onDeleteGroup, canDeleteGroup = false, isHost = false, embedded, onClose }: Props) {
   const [name, setName] = useState(member.name)
   const [avatar, setAvatar] = useState(member.avatar)
   const [avatarBlob, setAvatarBlob] = useState<Blob | null>(null)
@@ -432,7 +434,7 @@ export function SettingsPanel({ group, member, onSave, onAddMember, onRemoveMemb
                           ผูกอีเมล
                         </button>
                       )}
-                      {m.id !== member.id && (
+                      {isHost && m.id !== member.id && (
                         <button
                           type="button"
                           onClick={() => onRemoveMember(m.id)}
